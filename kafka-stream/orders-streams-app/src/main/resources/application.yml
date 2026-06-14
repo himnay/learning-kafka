@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: orders-kafka-streams
+  profiles:
+    active: local
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: Kafka Streams — orders count and revenue aggregation
+    version: 0.0.1-SNAPSHOT
+
+logging:
+  level:
+    com.learnkafkastreams: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  kafka:
+    streams:
+      bootstrap-servers: localhost:9092
+      application-id: orders-kafka-streams
+    properties:
+      default:
+        key:
+          serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+        value:
+          serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+        serialization:
+          exception:
+            handler: com.learnkafkastreams.exceptionhandler.StreamsSerializationExceptionHandler

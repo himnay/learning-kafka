@@ -1,0 +1,177 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-06-13T00:00:00.000Z",
+  "__export_source": "learning-kafka",
+  "resources": [
+    {
+      "_id": "wrk_learning_kafka",
+      "_type": "workspace",
+      "name": "Learning Kafka",
+      "description": "Kafka Core Producer/Consumer + Schema Registry APIs"
+    },
+
+    {
+      "_id": "fld_kafka_core",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Kafka Core — Library Events Producer",
+      "description": "REST endpoints on port 8080"
+    },
+
+    {
+      "_id": "req_post_library_event",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "POST — Create New Library Event",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": null,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+      }
+    },
+
+    {
+      "_id": "req_put_library_event",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "PUT — Update Library Event",
+      "method": "PUT",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": 1,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot 3.x\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+      }
+    },
+
+    {
+      "_id": "req_post_library_event_invalid",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "POST — Create Invalid Event (400)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": null,\n  \"book\": {\n    \"bookId\": null,\n    \"bookName\": \"Missing Fields Test\",\n    \"bookAuthor\": null\n  }\n}"
+      }
+    },
+
+    {
+      "_id": "fld_actuator_producer",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Actuator — Library Events Producer (8080)"
+    },
+
+    {
+      "_id": "req_health_producer",
+      "_type": "request",
+      "parentId": "fld_actuator_producer",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8080/actuator/health"
+    },
+
+    {
+      "_id": "req_metrics_producer",
+      "_type": "request",
+      "parentId": "fld_actuator_producer",
+      "name": "GET — Prometheus Metrics",
+      "method": "GET",
+      "url": "http://localhost:8080/actuator/prometheus"
+    },
+
+    {
+      "_id": "fld_actuator_consumer",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Actuator — Library Events Consumer (8081)"
+    },
+
+    {
+      "_id": "req_health_consumer",
+      "_type": "request",
+      "parentId": "fld_actuator_consumer",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8081/actuator/health"
+    },
+
+    {
+      "_id": "req_metrics_consumer",
+      "_type": "request",
+      "parentId": "fld_actuator_consumer",
+      "name": "GET — Prometheus Metrics",
+      "method": "GET",
+      "url": "http://localhost:8081/actuator/prometheus"
+    },
+
+    {
+      "_id": "fld_streams",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Actuator — Orders Kafka Streams (8082)"
+    },
+
+    {
+      "_id": "req_health_streams",
+      "_type": "request",
+      "parentId": "fld_streams",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8082/actuator/health"
+    },
+
+    {
+      "_id": "req_metrics_streams",
+      "_type": "request",
+      "parentId": "fld_streams",
+      "name": "GET — Prometheus Metrics",
+      "method": "GET",
+      "url": "http://localhost:8082/actuator/prometheus"
+    },
+
+    {
+      "_id": "fld_schema",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Actuator — Coffee Orders Service (8083)"
+    },
+
+    {
+      "_id": "req_health_schema_service",
+      "_type": "request",
+      "parentId": "fld_schema",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8083/actuator/health"
+    },
+
+    {
+      "_id": "fld_schema_consumer",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Actuator — Coffee Orders Consumer (8084)"
+    },
+
+    {
+      "_id": "req_health_schema_consumer",
+      "_type": "request",
+      "parentId": "fld_schema_consumer",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8084/actuator/health"
+    }
+  ]
+}
