@@ -1,7 +1,7 @@
 package com.learnkafka.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
 import com.learnkafka.jpa.LibraryEventsRepository;
@@ -33,7 +33,7 @@ public class LibraryEventsService {
         LibraryEvent libraryEvent;
         try {
             libraryEvent = objectMapper.readValue(consumerRecord.value(), LibraryEvent.class);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new RuntimeException("Failed to deserialize library event: " + e.getMessage(), e);
         }
         log.info("Processing libraryEvent : {}", libraryEvent);

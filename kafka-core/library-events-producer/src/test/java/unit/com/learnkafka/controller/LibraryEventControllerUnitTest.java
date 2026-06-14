@@ -4,12 +4,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnkafka.domain.Book;
 import com.learnkafka.domain.LibraryEvent;
 import com.learnkafka.producer.LibraryEventProducer;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -20,16 +23,25 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(LibraryEventsController.class)
+@ExtendWith(MockitoExtension.class)
 class LibraryEventControllerUnitTest {
 
-    @Autowired
+    @Mock
+    LibraryEventProducer libraryEventProducer;
+
+    @InjectMocks
+    LibraryEventsController controller;
+
     MockMvc mockMvc;
 
     ObjectMapper objectMapper = new ObjectMapper();
 
-    @MockBean
-    LibraryEventProducer libraryEventProducer;
+    @BeforeEach
+    void setUp() {
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new LibraryEventControllerAdvice())
+                .build();
+    }
 
     private Book validBook() {
         return Book.builder().bookId(123).bookAuthor("Dilip").bookName("Kafka using Spring Boot").build();
@@ -49,7 +61,7 @@ class LibraryEventControllerUnitTest {
 
     @Test
     void postLibraryEvent_invalidBook_returns400() throws Exception {
-        var invalidBook  = Book.builder().bookId(null).bookAuthor(null).bookName("Kafka using Spring Boot").build();
+        var invalidBook = Book.builder().bookId(null).bookAuthor(null).bookName("Kafka using Spring Boot").build();
         var event = LibraryEvent.builder().libraryEventId(null).book(invalidBook).build();
 
         mockMvc.perform(post("/v1/libraryevent")

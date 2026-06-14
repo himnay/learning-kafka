@@ -104,7 +104,7 @@ class LibraryEventsConsumerContainerTest {
                     verify(libraryEventsConsumerSpy, times(1)).onMessage(isA(ConsumerRecord.class));
                     verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
 
-                    List<LibraryEvent> saved = (List<LibraryEvent>) libraryEventsRepository.findAll();
+                    List<LibraryEvent> saved = libraryEventsRepository.findAll();
                     assertEquals(1, saved.size());
                     assertEquals(456, saved.get(0).getBook().getBookId());
                 });
@@ -171,7 +171,7 @@ class LibraryEventsConsumerContainerTest {
         Awaitility.await()
                 .atMost(15, TimeUnit.SECONDS)
                 .untilAsserted(() -> {
-                    List<LibraryEvent> saved = (List<LibraryEvent>) libraryEventsRepository.findAll();
+                    List<LibraryEvent> saved = libraryEventsRepository.findAll();
                     assertEquals(2, saved.size());
                     assertTrue(saved.stream().anyMatch(e -> e.getBook().getBookId() == 1));
                     assertTrue(saved.stream().anyMatch(e -> e.getBook().getBookId() == 2));

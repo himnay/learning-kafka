@@ -10,16 +10,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.web.client.RestClient;
 
 import java.util.HashMap;
 
@@ -35,8 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 })
 class LibraryEventsControllerIntegrationTest {
 
-    @Autowired
-    TestRestTemplate restTemplate;
+    @LocalServerPort
+    int port;
+
+    RestClient restClient;
 
     @Autowired
     EmbeddedKafkaBroker embeddedKafkaBroker;
@@ -45,6 +48,9 @@ class LibraryEventsControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        restClient = RestClient.builder()
+                .baseUrl("http://localhost:" + port)
+                .build();
         var configs = new HashMap<>(KafkaTestUtils.consumerProps("group1", "true", embeddedKafkaBroker));
         consumer = new DefaultKafkaConsumerFactory<>(configs, new IntegerDeserializer(), new StringDeserializer())
                 .createConsumer();
@@ -61,8 +67,12 @@ class LibraryEventsControllerIntegrationTest {
         var book  = Book.builder().bookId(123).bookAuthor("Dilip").bookName("Kafka using Spring Boot").build();
         var event = LibraryEvent.builder().libraryEventId(null).book(book).build();
 
-        var response = restTemplate.exchange("/v1/libraryevent", HttpMethod.POST,
-                new HttpEntity<>(event), LibraryEvent.class);
+        ResponseEntity<Void> response = restClient.post()
+                .uri("/v1/libraryevent")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(event)
+                .retrieve()
+                .toBodilessEntity();
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
 
@@ -77,8 +87,12 @@ class LibraryEventsControllerIntegrationTest {
         var book  = Book.builder().bookId(456).bookAuthor("Dilip").bookName("Kafka using Spring Boot").build();
         var event = LibraryEvent.builder().libraryEventId(123).book(book).build();
 
-        var response = restTemplate.exchange("/v1/libraryevent", HttpMethod.PUT,
-                new HttpEntity<>(event), LibraryEvent.class);
+        ResponseEntity<Void> response = restClient.put()
+                .uri("/v1/libraryevent")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(event)
+                .retrieve()
+                .toBodilessEntity();
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
 
