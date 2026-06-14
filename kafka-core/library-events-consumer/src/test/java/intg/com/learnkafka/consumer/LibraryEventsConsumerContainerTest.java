@@ -1,7 +1,6 @@
 package com.learnkafka.consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.learnkafka.entity.Book;
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
@@ -45,7 +44,7 @@ import static org.mockito.Mockito.verify;
  * to ensure parity with the local dev environment.
  */
 @SpringBootTest
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class LibraryEventsConsumerContainerTest {
 
     @Container
@@ -91,7 +90,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
-    void publishNewLibraryEvent_persistsToDatabase() throws ExecutionException, InterruptedException, JsonProcessingException {
+    void publishNewLibraryEvent_persistsToDatabase() throws ExecutionException, InterruptedException {
         String json = """
                 {"libraryEventId":null,"libraryEventType":"NEW",
                  "book":{"bookId":456,"bookName":"Kafka Using Spring Boot","bookAuthor":"Dilip"}}
@@ -111,7 +110,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
-    void publishUpdateLibraryEvent_updatesDatabase() throws JsonProcessingException, ExecutionException, InterruptedException {
+    void publishUpdateLibraryEvent_updatesDatabase() throws ExecutionException, InterruptedException {
         String newJson = """
                 {"libraryEventId":null,"libraryEventType":"NEW",
                  "book":{"bookId":456,"bookName":"Kafka Using Spring Boot","bookAuthor":"Dilip"}}
@@ -137,7 +136,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
-    void publishUpdateLibraryEvent_withInvalidId_isDiscarded() throws JsonProcessingException, ExecutionException, InterruptedException {
+    void publishUpdateLibraryEvent_withInvalidId_isDiscarded() throws ExecutionException, InterruptedException {
         Integer unknownId = 99999;
         String json = """
                 {"libraryEventId":99999,"libraryEventType":"UPDATE",
@@ -155,7 +154,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
-    void publishNewLibraryEvent_multipleEvents_allPersisted() throws JsonProcessingException, ExecutionException, InterruptedException {
+    void publishNewLibraryEvent_multipleEvents_allPersisted() throws ExecutionException, InterruptedException {
         var json1 = """
                 {"libraryEventId":null,"libraryEventType":"NEW",
                  "book":{"bookId":1,"bookName":"Book One","bookAuthor":"Author A"}}

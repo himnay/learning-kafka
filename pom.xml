@@ -5,13 +5,15 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.learnkafka</groupId>
+        <groupId>com.org.llm</groupId>
         <artifactId>super-pom</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
-        <relativePath>super-pom/pom.xml</relativePath>
+        <version>1.0.0</version>
+        <relativePath>../super-pom/pom.xml</relativePath>
     </parent>
 
+    <groupId>com.learnkafka</groupId>
     <artifactId>learning-kafka</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>learning-kafka</name>
     <description>Root POM — Kafka learning modules: core producer/consumer, Kafka Streams, and Avro Schema Registry</description>
@@ -21,6 +23,16 @@
         <module>kafka-stream</module>
         <module>kafka-schema-registry</module>
     </modules>
+
+    <properties>
+        <!-- Override super-pom default (21) — Kafka modules require Java 25 -->
+        <java.version>25</java.version>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+
+        <!-- Build plugin versions -->
+        <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
+    </properties>
 
     <build>
         <plugins>

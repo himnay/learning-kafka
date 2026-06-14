@@ -1,7 +1,6 @@
 package com.learnkafka.producer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.learnkafka.domain.Book;
 import com.learnkafka.domain.LibraryEvent;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -45,7 +44,7 @@ class LibraryEventProducerUnitTest {
     }
 
     @Test
-    void sendLibraryEventWithHeaders_failure() throws JsonProcessingException, ExecutionException, InterruptedException {
+    void sendLibraryEventWithHeaders_failure() throws ExecutionException, InterruptedException {
         CompletableFuture<SendResult<Integer, String>> future = new CompletableFuture<>();
         future.completeExceptionally(new RuntimeException("Exception Calling Kafka"));
         when(kafkaTemplate.send(isA(ProducerRecord.class))).thenReturn(future);
@@ -54,7 +53,7 @@ class LibraryEventProducerUnitTest {
     }
 
     @Test
-    void sendLibraryEventWithHeaders_success() throws JsonProcessingException, ExecutionException, InterruptedException {
+    void sendLibraryEventWithHeaders_success() throws ExecutionException, InterruptedException {
         var libraryEvent = buildEvent();
         var record = objectMapper.writeValueAsString(libraryEvent);
 

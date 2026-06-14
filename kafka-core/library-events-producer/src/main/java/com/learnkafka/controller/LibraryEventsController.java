@@ -1,6 +1,5 @@
 package com.learnkafka.controller;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.learnkafka.domain.LibraryEvent;
 import com.learnkafka.domain.LibraryEventType;
 import com.learnkafka.producer.LibraryEventProducer;
@@ -34,7 +33,7 @@ public class LibraryEventsController {
                     @ApiResponse(responseCode = "400", description = "Validation error")
             })
     public ResponseEntity<LibraryEvent> postLibraryEvent(
-            @RequestBody @Valid LibraryEvent libraryEvent) throws JsonProcessingException {
+            @RequestBody @Valid LibraryEvent libraryEvent) {
         var event = LibraryEvent.builder()
                 .libraryEventId(libraryEvent.libraryEventId())
                 .libraryEventType(LibraryEventType.NEW)
@@ -52,7 +51,7 @@ public class LibraryEventsController {
                     @ApiResponse(responseCode = "400", description = "Missing libraryEventId or validation error")
             })
     public ResponseEntity<LibraryEvent> putLibraryEvent(
-            @RequestBody @Valid LibraryEvent libraryEvent) throws JsonProcessingException {
+            @RequestBody @Valid LibraryEvent libraryEvent) {
         if (libraryEvent.libraryEventId() == null) {
             return ResponseEntity.badRequest().build();
         }

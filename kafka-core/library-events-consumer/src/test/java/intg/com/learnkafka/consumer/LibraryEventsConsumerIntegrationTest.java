@@ -1,7 +1,6 @@
 package com.learnkafka.consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.learnkafka.entity.Book;
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
@@ -77,7 +76,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
-    void publishNewLibraryEvent() throws ExecutionException, InterruptedException, JsonProcessingException {
+    void publishNewLibraryEvent() throws ExecutionException, InterruptedException {
         String json = "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
         kafkaTemplate.sendDefault(json).get();
 
@@ -94,7 +93,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
-    void publishUpdateLibraryEvent() throws JsonProcessingException, ExecutionException, InterruptedException {
+    void publishUpdateLibraryEvent() throws ExecutionException, InterruptedException {
         String json = "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
         LibraryEvent libraryEvent = objectMapper.readValue(json, LibraryEvent.class);
         libraryEvent.getBook().setLibraryEvent(libraryEvent);
@@ -117,7 +116,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
-    void publishModifyLibraryEvent_Not_A_Valid_LibraryEventId() throws JsonProcessingException, InterruptedException, ExecutionException {
+    void publishModifyLibraryEvent_Not_A_Valid_LibraryEventId() throws InterruptedException, ExecutionException {
         Integer libraryEventId = 123;
         String json = "{\"libraryEventId\":" + libraryEventId + ",\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
         kafkaTemplate.sendDefault(libraryEventId, json).get();
@@ -133,7 +132,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
-    void publishModifyLibraryEvent_Null_LibraryEventId() throws JsonProcessingException, InterruptedException, ExecutionException {
+    void publishModifyLibraryEvent_Null_LibraryEventId() throws InterruptedException, ExecutionException {
         Integer libraryEventId = null;
         String json = "{\"libraryEventId\":" + libraryEventId + ",\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
         kafkaTemplate.sendDefault(libraryEventId, json).get();

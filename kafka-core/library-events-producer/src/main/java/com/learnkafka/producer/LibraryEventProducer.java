@@ -1,7 +1,6 @@
 package com.learnkafka.producer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.learnkafka.domain.LibraryEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,8 +31,7 @@ public class LibraryEventProducer {
      * Fire-and-forget send using the default topic (async, CompletableFuture callback).
      * Strategy Pattern: delegates completion handling to handleSuccess / handleFailure.
      */
-    public CompletableFuture<SendResult<Integer, String>> sendLibraryEvent(LibraryEvent libraryEvent)
-            throws JsonProcessingException {
+    public CompletableFuture<SendResult<Integer, String>> sendLibraryEvent(LibraryEvent libraryEvent) {
         var key   = libraryEvent.libraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
         return kafkaTemplate.sendDefault(key, value)
@@ -47,8 +45,7 @@ public class LibraryEventProducer {
      * Send via explicit ProducerRecord with custom headers (async).
      * Builder Pattern: ProducerRecord constructed via buildProducerRecord factory method.
      */
-    public CompletableFuture<SendResult<Integer, String>> sendLibraryEventWithHeaders(LibraryEvent libraryEvent)
-            throws JsonProcessingException {
+    public CompletableFuture<SendResult<Integer, String>> sendLibraryEventWithHeaders(LibraryEvent libraryEvent) {
         var key            = libraryEvent.libraryEventId();
         var value          = objectMapper.writeValueAsString(libraryEvent);
         var producerRecord = buildProducerRecord(key, value, TOPIC);
@@ -64,7 +61,7 @@ public class LibraryEventProducer {
      * where the caller needs confirmation before returning a response.
      */
     public SendResult<Integer, String> sendLibraryEventSynchronous(LibraryEvent libraryEvent)
-            throws JsonProcessingException, ExecutionException, InterruptedException, TimeoutException {
+            throws ExecutionException, InterruptedException, TimeoutException {
         var key   = libraryEvent.libraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
         return kafkaTemplate.sendDefault(key, value).get(1, TimeUnit.SECONDS);
