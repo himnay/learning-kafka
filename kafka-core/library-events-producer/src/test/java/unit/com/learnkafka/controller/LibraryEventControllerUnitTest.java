@@ -5,6 +5,7 @@ import com.learnkafka.domain.Book;
 import com.learnkafka.domain.LibraryEvent;
 import com.learnkafka.producer.LibraryEventProducer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -48,6 +49,7 @@ class LibraryEventControllerUnitTest {
     }
 
     @Test
+    @DisplayName("POSTing a valid library event returns HTTP 201 Created")
     void postLibraryEvent_returns201() throws Exception {
         var event = LibraryEvent.builder().libraryEventId(null).book(validBook()).build();
         when(libraryEventProducer.sendLibraryEventWithHeaders(isA(LibraryEvent.class)))
@@ -60,6 +62,7 @@ class LibraryEventControllerUnitTest {
     }
 
     @Test
+    @DisplayName("POSTing a library event with an invalid book returns HTTP 400 with field validation error messages")
     void postLibraryEvent_invalidBook_returns400() throws Exception {
         var invalidBook = Book.builder().bookId(null).bookAuthor(null).bookName("Kafka using Spring Boot").build();
         var event = LibraryEvent.builder().libraryEventId(null).book(invalidBook).build();
@@ -72,6 +75,7 @@ class LibraryEventControllerUnitTest {
     }
 
     @Test
+    @DisplayName("PUTting a valid library event update returns HTTP 200 OK")
     void putLibraryEvent_returns200() throws Exception {
         var event = LibraryEvent.builder().libraryEventId(123).book(validBook()).build();
         when(libraryEventProducer.sendLibraryEventWithHeaders(isA(LibraryEvent.class)))
@@ -84,6 +88,7 @@ class LibraryEventControllerUnitTest {
     }
 
     @Test
+    @DisplayName("PUTting a library event with a null library event id returns HTTP 400 Bad Request")
     void putLibraryEvent_nullId_returns400() throws Exception {
         var event = LibraryEvent.builder().libraryEventId(null).book(validBook()).build();
 

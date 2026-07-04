@@ -7,6 +7,7 @@ import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -63,6 +64,7 @@ class LibraryEventsControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("POSTing a new library event returns 201 Created and publishes a NEW event to the library-events topic")
     void postLibraryEvent_publishes_newEvent() {
         var book  = Book.builder().bookId(123).bookAuthor("Dilip").bookName("Kafka using Spring Boot").build();
         var event = LibraryEvent.builder().libraryEventId(null).book(book).build();
@@ -83,6 +85,7 @@ class LibraryEventsControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("PUTting a library event update returns 200 OK and publishes an UPDATE event to the library-events topic")
     void putLibraryEvent_publishes_updateEvent() {
         var book  = Book.builder().bookId(456).bookAuthor("Dilip").bookName("Kafka using Spring Boot").build();
         var event = LibraryEvent.builder().libraryEventId(123).book(book).build();

@@ -6,6 +6,7 @@ import com.learnkafka.domain.LibraryEvent;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -44,6 +45,7 @@ class LibraryEventProducerUnitTest {
     }
 
     @Test
+    @DisplayName("Producer send failure propagates the underlying Kafka exception to the caller")
     void sendLibraryEventWithHeaders_failure() throws ExecutionException, InterruptedException {
         CompletableFuture<SendResult<Integer, String>> future = new CompletableFuture<>();
         future.completeExceptionally(new RuntimeException("Exception Calling Kafka"));
@@ -53,6 +55,7 @@ class LibraryEventProducerUnitTest {
     }
 
     @Test
+    @DisplayName("Producer successfully sends the library event and returns the resulting record metadata")
     void sendLibraryEventWithHeaders_success() throws ExecutionException, InterruptedException {
         var libraryEvent = buildEvent();
         var record = objectMapper.writeValueAsString(libraryEvent);

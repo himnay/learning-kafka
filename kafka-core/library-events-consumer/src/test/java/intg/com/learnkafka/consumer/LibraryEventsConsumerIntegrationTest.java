@@ -10,6 +10,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -76,6 +77,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
+    @DisplayName("Publishing a new library event invokes the consumer and service and persists it")
     void publishNewLibraryEvent() throws ExecutionException, InterruptedException {
         String json = "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
         kafkaTemplate.sendDefault(json).get();
@@ -93,6 +95,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
+    @DisplayName("Publishing an update library event invokes the consumer and updates the persisted book details")
     void publishUpdateLibraryEvent() throws ExecutionException, InterruptedException {
         String json = "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
         LibraryEvent libraryEvent = objectMapper.readValue(json, LibraryEvent.class);
@@ -116,6 +119,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
+    @DisplayName("Update event with a library event id not found in the database is consumed but not persisted")
     void publishModifyLibraryEvent_Not_A_Valid_LibraryEventId() throws InterruptedException, ExecutionException {
         Integer libraryEventId = 123;
         String json = "{\"libraryEventId\":" + libraryEventId + ",\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
@@ -132,6 +136,7 @@ public class LibraryEventsConsumerIntegrationTest {
     }
 
     @Test
+    @DisplayName("Update event with a null library event id is still consumed by the listener")
     void publishModifyLibraryEvent_Null_LibraryEventId() throws InterruptedException, ExecutionException {
         Integer libraryEventId = null;
         String json = "{\"libraryEventId\":" + libraryEventId + ",\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";

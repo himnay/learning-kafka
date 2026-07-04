@@ -10,6 +10,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -49,7 +50,9 @@ class LibraryEventsConsumerContainerTest {
 
     @Container
     static final ConfluentKafkaContainer KAFKA = new ConfluentKafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.7.1"));
+            DockerImageName.parse("confluentinc/cp-kafka:7.7.1"))
+            // listener runs with concurrency 3; auto-created topics must have 3 partitions
+            .withEnv("KAFKA_NUM_PARTITIONS", "3");
 
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
@@ -90,6 +93,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
+    @DisplayName("Publishing a new library event persists it to the database")
     void publishNewLibraryEvent_persistsToDatabase() throws ExecutionException, InterruptedException {
         String json = """
                 {"libraryEventId":null,"libraryEventType":"NEW",
@@ -110,6 +114,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
+    @DisplayName("Publishing an update library event updates the matching record in the database")
     void publishUpdateLibraryEvent_updatesDatabase() throws ExecutionException, InterruptedException {
         String newJson = """
                 {"libraryEventId":null,"libraryEventType":"NEW",
@@ -136,6 +141,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
+    @DisplayName("Update event referencing an unknown library event id is discarded without persisting")
     void publishUpdateLibraryEvent_withInvalidId_isDiscarded() throws ExecutionException, InterruptedException {
         Integer unknownId = 99999;
         String json = """
@@ -154,6 +160,7 @@ class LibraryEventsConsumerContainerTest {
     }
 
     @Test
+    @DisplayName("Publishing multiple new library events persists all of them to the database")
     void publishNewLibraryEvent_multipleEvents_allPersisted() throws ExecutionException, InterruptedException {
         var json1 = """
                 {"libraryEventId":null,"libraryEventType":"NEW",

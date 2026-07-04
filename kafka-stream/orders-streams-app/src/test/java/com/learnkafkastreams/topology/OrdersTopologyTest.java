@@ -14,6 +14,7 @@ import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.serializer.JsonSerde;
 
@@ -63,6 +64,7 @@ class OrdersTopologyTest {
     }
 
     @Test
+    @DisplayName("Topology counts general orders per store correctly in the count store")
     void countGeneralOrdersByStore() {
         storesInputTopic.pipeKeyValueList(buildStores());
         ordersInputTopic.pipeKeyValueList(buildOrders());
@@ -73,6 +75,7 @@ class OrdersTopologyTest {
     }
 
     @Test
+    @DisplayName("Topology counts restaurant orders per store correctly in the count store")
     void countRestaurantOrdersByStore() {
         storesInputTopic.pipeKeyValueList(buildStores());
         ordersInputTopic.pipeKeyValueList(buildOrders());
@@ -82,6 +85,7 @@ class OrdersTopologyTest {
     }
 
     @Test
+    @DisplayName("Topology computes running revenue and order count for general orders per store")
     void revenueGeneralOrdersByStore() {
         storesInputTopic.pipeKeyValueList(buildStores());
         ordersInputTopic.pipeKeyValueList(buildOrders());
@@ -94,6 +98,7 @@ class OrdersTopologyTest {
     }
 
     @Test
+    @DisplayName("Topology computes running revenue and order count for restaurant orders per store")
     void revenueRestaurantOrdersByStore() {
         storesInputTopic.pipeKeyValueList(buildStores());
         ordersInputTopic.pipeKeyValueList(buildOrders());
@@ -106,6 +111,7 @@ class OrdersTopologyTest {
     }
 
     @Test
+    @DisplayName("Multiple orders for the same store accumulate count and revenue rather than overwriting it")
     void multipleOrdersSameStore_accumulatesCount() {
         storesInputTopic.pipeKeyValueList(buildStores());
 
