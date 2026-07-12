@@ -4,16 +4,16 @@
 
 ## Table of contents
 
-1. [Project Structure](#project-structure)
-2. [Part 1 — Core Kafka Concepts](#part-1--core-kafka-concepts-grounded-in-this-codebase)
-3. [Part 2 — Component & Message-Flow Diagrams](#part-2--component--message-flow-diagrams)
-4. [Tech Stack](#tech-stack)
-5. [Gang of Four Design Patterns Applied](#gang-of-four-design-patterns-applied)
-6. [Quick Start](#quick-start)
-7. [API Reference — Library Events Producer](#api-reference--library-events-producer-port-8080)
-8. [Observability](#observability)
-9. [Running Tests](#running-tests)
-10. [Module Details](#module-details)
+1. 🏗️ [Project Structure](#project-structure)
+2. 📨 [Part 1 — Core Kafka Concepts](#part-1--core-kafka-concepts-grounded-in-this-codebase)
+3. 📨 [Part 2 — Component & Message-Flow Diagrams](#part-2--component--message-flow-diagrams)
+4. 🧰 [Tech Stack](#tech-stack)
+5. 🏗️ [Gang of Four Design Patterns Applied](#gang-of-four-design-patterns-applied)
+6. 🚀 [Quick Start](#quick-start)
+7. 🌐 [API Reference — Library Events Producer](#api-reference--library-events-producer-port-8080)
+8. 📈 [Observability](#observability)
+9. 🧪 [Running Tests](#running-tests)
+10. 🏗️ [Module Details](#module-details)
 
 A multi-module Maven project demonstrating Apache Kafka with Spring Boot 3.5, Java 25, Confluent Schema Registry, and Kafka Streams. Unlike a toy "hello world," each module wires up the pieces you actually need in production: retryable consumers with dead-letter routing, Avro schema evolution against a real Schema Registry, and a stateful Kafka Streams topology with interactive queries.
 
