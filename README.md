@@ -21,7 +21,8 @@ This document is a **conceptual deep-dive** — it explains *why* Kafka is shape
 
 ---
 
-## Project Structure
+<a id="project-structure"></a>
+## 1. 🏗️ Project Structure
 
 ```
 learning-kafka/                       ← root POM (spring-boot-starter-parent)
@@ -94,7 +95,8 @@ Kafka retains records for a configured time/size window (topic retention), indep
 
 ---
 
-## Part 2 — Component & Message-Flow Diagrams
+<a id="part-2--component--message-flow-diagrams"></a>
+## 3. 📨 Part 2 — Component & Message-Flow Diagrams
 
 ### 2.1 System component diagram
 
@@ -169,7 +171,8 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 
 ---
 
-## Tech Stack
+<a id="tech-stack"></a>
+## 4. 🧰 Tech Stack
 
 | Concern | Technology |
 |---|---|
@@ -187,7 +190,8 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 
 ---
 
-## Gang of Four Design Patterns Applied
+<a id="gang-of-four-design-patterns-applied"></a>
+## 5. 🏗️ Gang of Four Design Patterns Applied
 
 ### Creational
 | Pattern | Where |
@@ -209,7 +213,8 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 
 ---
 
-## Quick Start
+<a id="quick-start"></a>
+## 6. 🚀 Quick Start
 
 ### 1. Start the infrastructure
 
@@ -294,7 +299,8 @@ Response `200 OK`.
 
 ---
 
-## Observability
+<a id="observability"></a>
+## 8. 📈 Observability
 
 All modules expose Actuator endpoints:
 
@@ -308,7 +314,8 @@ Import `insomnia-collection.json` into Insomnia to test all endpoints including 
 
 ---
 
-## Running Tests
+<a id="running-tests"></a>
+## 9. 🧪 Running Tests
 
 ```bash
 # Unit + integration tests (all modules)
@@ -322,7 +329,8 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 ---
 
-## Module Details
+<a id="module-details"></a>
+## 10. 🏗️ Module Details
 
 ### kafka-core/library-events-producer
 - REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`
