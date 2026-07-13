@@ -64,8 +64,12 @@ The **key** a producer assigns to a record determines which partition it lands o
 
 Kafka does not track "read" vs "unread" the way a queue does. Instead, each **consumer group** tracks a *committed offset* per partition — the position it will resume from after a restart or rebalance. The broker's `__consumer_offsets` internal topic stores this.
 
+<ul>
+
 - `library-events-consumer` runs with the **default auto-commit** behavior (Spring Kafka commits the offset for you after the listener method returns without throwing).
 - `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile) demonstrates the alternative: `AcknowledgingMessageListener` with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
+
+</ul>
 
 `auto-offset-reset: earliest` is set on both `library-events-consumer` and the streams app, meaning a *brand new* consumer group with no committed offset starts from the beginning of the topic rather than only seeing new records.
 
@@ -85,9 +89,13 @@ A **consumer group** is a set of consumer instances that cooperatively read a to
 
 This codebase is explicitly **at-least-once**:
 
+<ul>
+
 - `library-events-producer` sets `acks: all` (wait for all in-sync replicas) with `enable.idempotence: true` and `retries: 10` — this makes *producer-side* sends idempotent (no duplicate writes from producer retries) and durable, but does not make the end-to-end pipeline exactly-once.
 - `library-events-consumer`'s default listener commits the offset only after `LibraryEventsService.processLibraryEvent()` returns successfully (implicit ack-after-processing). If the JVM crashes after the DB write but before the offset commit, the same record is redelivered on restart — the consumer must tolerate reprocessing (in this demo it isn't made strictly idempotent; a second `save()` of the same JPA entity is an upsert-by-id, which is *close* to idempotent by accident of using `@Id` on `libraryEventId`).
 - Kafka Streams uses `processing.guarantee=at_least_once` by default (not overridden anywhere in `OrdersStreamsConfiguration`), so the count/revenue aggregations can, in rare failure-and-reprocessing scenarios, double-count a record. Enabling exactly-once semantics for the streams app would mean setting `processing.guarantee=exactly_once_v2`, which turns on transactional writes to the state-store changelog topics and the output topics together.
+
+</ul>
 
 ### Retention, compaction, and the internal topics you don't see
 
@@ -333,35 +341,59 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 ## 10. 🏗️ Module Details
 
 ### kafka-core/library-events-producer
+<ul>
+
 - REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`
 - Kafka producer with async `CompletableFuture`-based send
 - Custom headers per record (`event-source: scanner`)
 - `@ControllerAdvice` for validation error mapping
 - Deep dive: [`kafka-core/README.md`](kafka-core/README.md)
 
+</ul>
+
 ### kafka-core/library-events-consumer
+<ul>
+
 - `@KafkaListener` consuming the `library-events` topic
 - Persists `LibraryEvent` + `Book` entities to H2 via Spring Data JPA
 - `DefaultErrorHandler` with `FixedBackOff` (1 s delay, 2 retries — 3 attempts total)
 - `IllegalArgumentException` is not retried and goes straight to the dead-letter topic `library-events.DLT`; `RecoverableDataAccessException` triggers recovery by re-publishing the event
 - Deep dive: [`kafka-core/README.md`](kafka-core/README.md)
 
+</ul>
+
 ### kafka-stream/orders-streams-app
+<ul>
+
 - `@EnableKafkaStreams` Spring Boot integration
 - `OrdersTopology` builds the Kafka Streams topology: re-key by `locationId`, branch orders by type (`GENERAL` / `RESTAURANT`), aggregate per-store count and running revenue into materialized state stores
 - Custom deserialization (`RecoveringDeserializationExceptionHandler` + log-and-skip) and serialization (`StreamsSerializationExceptionHandler`) exception handlers, plus a custom `StreamsUncaughtExceptionHandler` that decides between replacing the stream thread and shutting the app down
 - `OrdersController` / `OrderStoreService` expose the state stores as a queryable REST API (interactive queries)
 - Deep dive: [`kafka-stream/README.md`](kafka-stream/README.md)
 
+</ul>
+
 ### kafka-schema-registry/schemas
+<ul>
+
 - Avro `.avsc` schema definitions for `CoffeeOrder`, `OrderLineItem`, `Store`, `Address`, `OrderId`, `CoffeeUpdateEvent`
 - `avro-maven-plugin` generates Java classes into `target/generated-sources/avro` at build time
 
+</ul>
+
 ### kafka-schema-registry/coffee-orders-service
+<ul>
+
 - Kafka producer using Confluent `KafkaAvroSerializer`
 - Schemas registered automatically to `http://localhost:8085`
 - Deep dive: [`kafka-schema-registry/README.md`](kafka-schema-registry/README.md)
 
+</ul>
+
 ### kafka-schema-registry/coffee-orders-consumer
+<ul>
+
 - Kafka consumer using Confluent `KafkaAvroDeserializer` with `specific.avro.reader=true`
 - Deep dive: [`kafka-schema-registry/README.md`](kafka-schema-registry/README.md)
+
+</ul>
