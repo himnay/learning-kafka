@@ -341,6 +341,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 ## 10. 🏗️ Module Details
 
 ### kafka-core/library-events-producer
+
 <ul>
 
 - REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`
@@ -352,6 +353,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 </ul>
 
 ### kafka-core/library-events-consumer
+
 <ul>
 
 - `@KafkaListener` consuming the `library-events` topic
@@ -363,6 +365,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 </ul>
 
 ### kafka-stream/orders-streams-app
+
 <ul>
 
 - `@EnableKafkaStreams` Spring Boot integration
@@ -374,6 +377,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 </ul>
 
 ### kafka-schema-registry/schemas
+
 <ul>
 
 - Avro `.avsc` schema definitions for `CoffeeOrder`, `OrderLineItem`, `Store`, `Address`, `OrderId`, `CoffeeUpdateEvent`
@@ -382,6 +386,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 </ul>
 
 ### kafka-schema-registry/coffee-orders-service
+
 <ul>
 
 - Kafka producer using Confluent `KafkaAvroSerializer`
@@ -391,6 +396,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 </ul>
 
 ### kafka-schema-registry/coffee-orders-consumer
+
 <ul>
 
 - Kafka consumer using Confluent `KafkaAvroDeserializer` with `specific.avro.reader=true`
