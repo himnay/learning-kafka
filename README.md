@@ -40,7 +40,8 @@ learning-kafka/                       ← root POM (spring-boot-starter-parent)
 
 ---
 
-## Part 1 — Core Kafka Concepts, Grounded in This Codebase
+<a id="part-1--core-kafka-concepts-grounded-in-this-codebase"></a>
+## 2. 📨 Part 1 — Core Kafka Concepts, Grounded in This Codebase
 
 Kafka is a distributed, append-only, partitioned commit log. Everything else — topics, consumer groups, delivery guarantees, Streams, Schema Registry — is built on top of that one idea. The sections below explain the core vocabulary and immediately point at the line of code in this repository that exercises it.
 
@@ -260,7 +261,8 @@ mvn spring-boot:run -pl kafka-stream/orders-streams-app
 
 ---
 
-## API Reference — Library Events Producer (port 8080)
+<a id="api-reference--library-events-producer-port-8080"></a>
+## 7. 🌐 API Reference — Library Events Producer (port 8080)
 
 ### POST /v1/libraryevent — Publish a new library event
 
