@@ -77,21 +77,21 @@ Confluent Schema Registry's default compatibility mode for a new subject is **`B
 
 Every optional-looking field in this repo's schemas already follows that rule:
 
-| Field | Schema | Default | Why it matters |
-|---|---|---|---|
-| `nickName` | `CoffeeOrder` | `""` | A future schema version could drop `nickName` and old consumers reading new-schema data (or new consumers reading old-schema data, depending on direction) still resolve a value instead of erroring |
-| `status` | `CoffeeOrder` | `"NEW"` | Same — added after the fact without breaking readers that don't know about it yet |
-| `country` | `Address` | `"USA"` | Same pattern one level down, inside the nested `Store.address` record |
+| Field      | Schema        | Default | Why it matters                                                                                                                                                                                       |
+|------------|---------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `nickName` | `CoffeeOrder` | `""`    | A future schema version could drop `nickName` and old consumers reading new-schema data (or new consumers reading old-schema data, depending on direction) still resolve a value instead of erroring |
+| `status`   | `CoffeeOrder` | `"NEW"` | Same — added after the fact without breaking readers that don't know about it yet                                                                                                                    |
+| `country`  | `Address`     | `"USA"` | Same pattern one level down, inside the nested `Store.address` record                                                                                                                                |
 
 The other compatibility modes worth knowing, for contrast (none are explicitly configured in this repo — `BACKWARD` is Confluent's registry-wide default, since no `docker-compose` here sets `SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL` or an equivalent):
 
-| Mode | Guarantee | Typical use |
-|---|---|---|
-| `BACKWARD` (default) | New schema can read data written with the previous schema | Upgrade consumers before producers |
-| `FORWARD` | Previous schema can read data written with the new schema | Upgrade producers before consumers |
-| `FULL` | Both of the above | Producers and consumers can upgrade in any order |
-| `*_TRANSITIVE` variants | Same guarantee checked against *all* previous versions, not just the immediately preceding one | Long-lived topics with many schema revisions |
-| `NONE` | No compatibility checking | Registry is purely a schema store; evolution safety is the team's responsibility |
+| Mode                    | Guarantee                                                                                      | Typical use                                                                      |
+|-------------------------|------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
+| `BACKWARD` (default)    | New schema can read data written with the previous schema                                      | Upgrade consumers before producers                                               |
+| `FORWARD`               | Previous schema can read data written with the new schema                                      | Upgrade producers before consumers                                               |
+| `FULL`                  | Both of the above                                                                              | Producers and consumers can upgrade in any order                                 |
+| `*_TRANSITIVE` variants | Same guarantee checked against *all* previous versions, not just the immediately preceding one | Long-lived topics with many schema revisions                                     |
+| `NONE`                  | No compatibility checking                                                                      | Registry is purely a schema store; evolution safety is the team's responsibility |
 
 A concrete evolution exercise you can try against this codebase: add a new required field (no `default`) to `CoffeeOrder.avsc` and rerun `mvn generate-sources` on the `schemas` module, then try to produce with it against a registry that already has the previous version registered under `BACKWARD` compatibility — the Schema Registry's REST API will reject the registration (`409 Conflict`, incompatible schema) rather than allow it, precisely because a consumer still on the old schema would have no way to fill in that field.
 

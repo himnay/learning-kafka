@@ -54,10 +54,10 @@ The **key** is `libraryEventId` (an `Integer`, serialized with `IntegerSerialize
 
 Three send methods, each demonstrating a different Spring Kafka `KafkaTemplate` usage pattern:
 
-| Method | Used by | Behavior |
-|---|---|---|
-| `sendLibraryEventWithHeaders()` | `POST` / `PUT /v1/libraryevent` | Async send via an explicit `ProducerRecord` carrying a custom header `event-source: scanner`; returns a `CompletableFuture` the controller does not block on |
-| `sendLibraryEvent()` | available, not wired to a controller endpoint | Async send using `kafkaTemplate.sendDefault()` (the configured default topic) — no custom headers |
+| Method                          | Used by                                       | Behavior                                                                                                                                                            |
+|---------------------------------|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `sendLibraryEventWithHeaders()` | `POST` / `PUT /v1/libraryevent`               | Async send via an explicit `ProducerRecord` carrying a custom header `event-source: scanner`; returns a `CompletableFuture` the controller does not block on        |
+| `sendLibraryEvent()`            | available, not wired to a controller endpoint | Async send using `kafkaTemplate.sendDefault()` (the configured default topic) — no custom headers                                                                   |
 | `sendLibraryEventSynchronous()` | available, not wired to a controller endpoint | Blocks up to 1 second via `.get(1, TimeUnit.SECONDS)` — shown as the pattern to reach for only when the caller genuinely needs a confirmed offset before responding |
 
 `LibraryEventsController` calls `sendLibraryEventWithHeaders()` for both `POST` (sets `LibraryEventType.NEW`) and `PUT` (sets `LibraryEventType.UPDATE`, and 400s if `libraryEventId` is missing) and returns `201`/`200` to the HTTP caller **without waiting for the Kafka send to complete** — the send's success/failure is only observed by the `whenComplete()` callback (`handleSuccess` / `handleFailure`), which just logs. This is a fire-and-forget-from-the-HTTP-caller's-perspective design: the REST API's availability is decoupled from Kafka's availability, at the cost of the HTTP response not reflecting whether the message actually made it onto the topic.
@@ -116,10 +116,10 @@ handler.addNotRetryableExceptions(IllegalArgumentException.class);
 
 Recovery strategy (the Strategy-pattern branch inside `recoverer()`), keyed off the **root cause** of the listener exception:
 
-| Root cause | Behavior |
-|---|---|
-| `RecoverableDataAccessException` | Treated as transient — `LibraryEventsService.handleRecovery()` re-publishes the *same* key/value back onto `library-events` for a fresh pass through the whole pipeline later |
-| anything else (including `IllegalArgumentException`, and any exception that survives all retry attempts) | Routed via `DeadLetterPublishingRecoverer` to **`library-events.DLT`**, same partition number as the original record |
+| Root cause                                                                                               | Behavior                                                                                                                                                                      |
+|----------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `RecoverableDataAccessException`                                                                         | Treated as transient — `LibraryEventsService.handleRecovery()` re-publishes the *same* key/value back onto `library-events` for a fresh pass through the whole pipeline later |
+| anything else (including `IllegalArgumentException`, and any exception that survives all retry attempts) | Routed via `DeadLetterPublishingRecoverer` to **`library-events.DLT`**, same partition number as the original record                                                          |
 
 Retry attempts are logged via `handler.setRetryListeners(...)`, and the DLT topic is declared explicitly (`NewTopic(DLT_TOPIC).partitions(3).replicas(1)`), so it exists from application startup rather than being created lazily on first dead-letter — matching the source partition count so the "same partition" mapping in the recoverer above is meaningful.
 

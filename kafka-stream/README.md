@@ -69,12 +69,12 @@ Step by step, matching the actual code in `orderTopology()` / `aggregateOrdersCo
 
 ### The four materialized state stores
 
-| Store name | Constant | Keyed by | Value |
-|---|---|---|---|
-| `general_orders_count` | `GENERAL_ORDERS_COUNT` | `locationId` | `Long` — running count |
-| `general_orders_revenue` | `GENERAL_ORDERS_REVENUE` | `locationId` | `TotalRevenue` — running count + running `BigDecimal` revenue |
-| `restaurant_orders_count` | `RESTAURANT_ORDERS_COUNT` | `locationId` | `Long` |
-| `restaurant_orders_revenue` | `RESTAURANT_ORDERS_REVENUE` | `locationId` | `TotalRevenue` |
+| Store name                  | Constant                    | Keyed by     | Value                                                         |
+|-----------------------------|-----------------------------|--------------|---------------------------------------------------------------|
+| `general_orders_count`      | `GENERAL_ORDERS_COUNT`      | `locationId` | `Long` — running count                                        |
+| `general_orders_revenue`    | `GENERAL_ORDERS_REVENUE`    | `locationId` | `TotalRevenue` — running count + running `BigDecimal` revenue |
+| `restaurant_orders_count`   | `RESTAURANT_ORDERS_COUNT`   | `locationId` | `Long`                                                        |
+| `restaurant_orders_revenue` | `RESTAURANT_ORDERS_REVENUE` | `locationId` | `TotalRevenue`                                                |
 
 Constants also exist for windowed variants (`GENERAL_ORDERS_COUNT_WINDOWS`, `RESTAURANT_ORDERS_REVENUE_WINDOWS`, etc.) and corresponding DTOs (`OrdersCountPerStoreByWindowsDTO`, `OrdersRevenuePerStoreByWindowsDTO`) exist in `orders-domain`, but the current `orderTopology()` only builds the non-windowed count/revenue aggregations shown above — the windowed constants are declared for a future `windowedBy(...)` step that isn't wired into the topology yet.
 
@@ -94,12 +94,12 @@ Constants also exist for windowed variants (`GENERAL_ORDERS_COUNT_WINDOWS`, `RES
 
 Kafka Streams distinguishes deserialization errors, in-topology processing errors, and serialization errors — each has its own pluggable handler in this module, configured in `OrdersStreamsConfiguration`:
 
-| Failure mode | Handler | Configured behavior |
-|---|---|---|
-| A record fails to **deserialize** off `orders`/`stores` (bad bytes for the configured `Serde`) | `RecoveringDeserializationExceptionHandler` (Spring Kafka), delegating to a `logAndSkipRecoverer` lambda | Logs the record and exception, then skips it — the topology keeps running |
-| Also present: `StreamsDeserializationErrorHandler` (a plain Kafka Streams `DeserializationExceptionHandler`) | Counts errors via an `AtomicInteger`; returns `CONTINUE` for the first 10 errors, then `FAIL` | Demonstrates a circuit-breaker-style variant: tolerate a bounded number of bad records, but stop tolerating a flood of them |
+| Failure mode                                                                                                 | Handler                                                                                                                                                                         | Configured behavior                                                                                                                                                                                                                                   |
+|--------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| A record fails to **deserialize** off `orders`/`stores` (bad bytes for the configured `Serde`)               | `RecoveringDeserializationExceptionHandler` (Spring Kafka), delegating to a `logAndSkipRecoverer` lambda                                                                        | Logs the record and exception, then skips it — the topology keeps running                                                                                                                                                                             |
+| Also present: `StreamsDeserializationErrorHandler` (a plain Kafka Streams `DeserializationExceptionHandler`) | Counts errors via an `AtomicInteger`; returns `CONTINUE` for the first 10 errors, then `FAIL`                                                                                   | Demonstrates a circuit-breaker-style variant: tolerate a bounded number of bad records, but stop tolerating a flood of them                                                                                                                           |
 | A record fails during **topology processing** (uncaught exception in a stream operator, not deserialization) | `StreamsProcessorCustomErrorHandler` (`StreamsUncaughtExceptionHandler`, registered via `StreamsBuilderFactoryBeanConfigurer` — the Decorator pattern noted in the root README) | If the exception is a `StreamsException` whose cause's message is exactly `"Transient Error"`, returns `REPLACE_THREAD` (Kafka Streams replaces the dead stream thread and keeps the app running); any other exception returns `SHUTDOWN_APPLICATION` |
-| A record fails to **serialize** on the way to an output/changelog topic | `StreamsSerializationExceptionHandler` (`ProductionExceptionHandler`, wired via `spring.kafka.streams.properties.default.serialization.exception.handler` in `application.yml`) | Always returns `CONTINUE` — logs and drops the record rather than killing the producer |
+| A record fails to **serialize** on the way to an output/changelog topic                                      | `StreamsSerializationExceptionHandler` (`ProductionExceptionHandler`, wired via `spring.kafka.streams.properties.default.serialization.exception.handler` in `application.yml`) | Always returns `CONTINUE` — logs and drops the record rather than killing the producer                                                                                                                                                                |
 
 Note what this module does **not** do: unlike `library-events-consumer` in `kafka-core` (which routes unrecoverable records to an explicit `library-events.DLT` dead-letter topic), none of the handlers here publish failed records to a separate DLQ topic — every failure path in `orders-streams-app` is **log-and-skip** (or, for uncaught processing exceptions, potentially an application shutdown). There is no `orders-DLQ`/`orders.DLT` topic declared anywhere in this module's configuration. If you need replay-able failed records for this topology, adding a `DeadLetterPublishingRecoverer`-equivalent for Streams' deserialization/production handlers would be the natural extension — see `kafka-core/README.md` for what that looks like on the consumer side.
 
@@ -109,13 +109,13 @@ Note what this module does **not** do: unlike `library-events-consumer` in `kafk
 
 Kafka Streams' state stores are normally private to the stream-processing instance that owns their partitions. Spring's `StreamsBuilderFactoryBean` exposes the running `KafkaStreams` instance, and `OrderStoreService` uses `KafkaStreams.store(StoreQueryParameters...)` to obtain a **read-only** view of a named store directly from the JVM heap/RocksDB — no round-trip through Kafka, no separate database.
 
-| Endpoint | Backing store | Behavior |
-|---|---|---|
-| `GET /v1/orders/count/{orderType}` | `general_orders_count` / `restaurant_orders_count` | All stores' counts for that order type |
-| `GET /v1/orders/count/{orderType}/location/{locationId}` | same | Count for one store, `404` if absent |
-| `GET /v1/orders/count/all` | both count stores | Iterates `OrderType.values()`, tagging each row with its type |
-| `GET /v1/orders/revenue/{orderType}` | `general_orders_revenue` / `restaurant_orders_revenue` | All stores' running revenue for that order type |
-| `GET /v1/orders/revenue/{orderType}/location/{locationId}` | same | Revenue for one store, `404` if absent |
+| Endpoint                                                   | Backing store                                          | Behavior                                                      |
+|------------------------------------------------------------|--------------------------------------------------------|---------------------------------------------------------------|
+| `GET /v1/orders/count/{orderType}`                         | `general_orders_count` / `restaurant_orders_count`     | All stores' counts for that order type                        |
+| `GET /v1/orders/count/{orderType}/location/{locationId}`   | same                                                   | Count for one store, `404` if absent                          |
+| `GET /v1/orders/count/all`                                 | both count stores                                      | Iterates `OrderType.values()`, tagging each row with its type |
+| `GET /v1/orders/revenue/{orderType}`                       | `general_orders_revenue` / `restaurant_orders_revenue` | All stores' running revenue for that order type               |
+| `GET /v1/orders/revenue/{orderType}/location/{locationId}` | same                                                   | Revenue for one store, `404` if absent                        |
 
 `countStoreName(orderType)` / `revenueStoreName(orderType)` are the Strategy-pattern dispatch mentioned in the root README — they select which physical state store to query based on the `orderType` path variable, so `OrdersController` never needs to know the store names directly.
 

@@ -51,13 +51,13 @@ A **topic** is a named, ordered, immutable log of records. Kafka splits a topic 
 
 This repo creates its topics programmatically with Spring Kafka's `TopicBuilder`, rather than relying on broker auto-create, so partition counts are explicit and version-controlled:
 
-| Topic | Partitions | Declared in |
-|---|---|---|
-| `library-events` | 3 | `kafka-core/library-events-producer/.../config/AutoCreateConfig.java` |
-| `library-events.DLT` | 3 | `kafka-core/library-events-consumer/.../config/LibraryEventsConsumerConfig.java` |
-| `orders` | 2 | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java` |
-| `stores` | 2 | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java` |
-| `coffee-orders` | broker default | created implicitly on first produce by `coffee-orders-service` |
+| Topic                | Partitions     | Declared in                                                                      |
+|----------------------|----------------|----------------------------------------------------------------------------------|
+| `library-events`     | 3              | `kafka-core/library-events-producer/.../config/AutoCreateConfig.java`            |
+| `library-events.DLT` | 3              | `kafka-core/library-events-consumer/.../config/LibraryEventsConsumerConfig.java` |
+| `orders`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
+| `stores`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
+| `coffee-orders`      | broker default | created implicitly on first produce by `coffee-orders-service`                   |
 
 The **key** a producer assigns to a record determines which partition it lands on (`hash(key) % numPartitions`, by default). `LibraryEventProducer` keys every record by `libraryEventId` (an `Integer`); `OrdersTopology` re-keys the incoming order stream by `locationId` via `.selectKey((key, order) -> order.locationId())` specifically so that all orders for the same store land on the same partition — which is what makes per-store aggregation with a local state store possible (see Part 4).
 
@@ -82,11 +82,11 @@ A **consumer group** is a set of consumer instances that cooperatively read a to
 
 ### Delivery semantics: at-least-once, at-most-once, exactly-once
 
-| Semantic | Guarantee | Cost |
-|---|---|---|
-| At-most-once | Each record delivered zero or one times | Commit offset *before* processing — a crash mid-processing loses the record |
-| At-least-once | Each record delivered one or more times | Commit offset *after* processing — a crash before commit causes redelivery (must be idempotent) |
-| Exactly-once (EOS) | Each record has effect exactly once | Requires idempotent producer + transactions across the read-process-write cycle |
+| Semantic           | Guarantee                               | Cost                                                                                            |
+|--------------------|-----------------------------------------|-------------------------------------------------------------------------------------------------|
+| At-most-once       | Each record delivered zero or one times | Commit offset *before* processing — a crash mid-processing loses the record                     |
+| At-least-once      | Each record delivered one or more times | Commit offset *after* processing — a crash before commit causes redelivery (must be idempotent) |
+| Exactly-once (EOS) | Each record has effect exactly once     | Requires idempotent producer + transactions across the read-process-write cycle                 |
 
 This codebase is explicitly **at-least-once**:
 
@@ -183,19 +183,19 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 <a id="tech-stack"></a>
 ## 4. 🧰 Tech Stack
 
-| Concern | Technology |
-|---|---|
-| Language | Java 25 with virtual threads (Project Loom) |
-| Framework | Spring Boot 3.5.0 |
-| Messaging | Apache Kafka 3.9 — KRaft mode (no Zookeeper) |
-| Schema | Confluent Schema Registry + Apache Avro 1.12 |
-| Streams | Kafka Streams (via Spring Kafka) |
-| Persistence | Spring Data JPA + H2 |
-| Observability | Spring Actuator + Micrometer + Prometheus + Grafana |
-| API Docs | springdoc-openapi (Swagger UI at `/swagger-ui.html`) |
-| Testing | JUnit 5, Mockito, Awaitility, Spring Kafka Test (EmbeddedKafka), TestContainers |
-| Build | Maven 3.9 (multi-module) |
-| UI | Kafdrop (topic browser) |
+| Concern       | Technology                                                                      |
+|---------------|---------------------------------------------------------------------------------|
+| Language      | Java 25 with virtual threads (Project Loom)                                     |
+| Framework     | Spring Boot 3.5.0                                                               |
+| Messaging     | Apache Kafka 3.9 — KRaft mode (no Zookeeper)                                    |
+| Schema        | Confluent Schema Registry + Apache Avro 1.12                                    |
+| Streams       | Kafka Streams (via Spring Kafka)                                                |
+| Persistence   | Spring Data JPA + H2                                                            |
+| Observability | Spring Actuator + Micrometer + Prometheus + Grafana                             |
+| API Docs      | springdoc-openapi (Swagger UI at `/swagger-ui.html`)                            |
+| Testing       | JUnit 5, Mockito, Awaitility, Spring Kafka Test (EmbeddedKafka), TestContainers |
+| Build         | Maven 3.9 (multi-module)                                                        |
+| UI            | Kafdrop (topic browser)                                                         |
 
 ---
 
@@ -203,22 +203,22 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 ## 5. 🏗️ Gang of Four Design Patterns Applied
 
 ### Creational
-| Pattern | Where |
-|---|---|
+| Pattern            | Where                                                                                                                                               |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Factory Method** | `@Bean` methods in `LibraryEventsConsumerConfig`, `AutoCreateConfig`, `OrdersStreamsConfiguration` — Spring's IoC container is the concrete factory |
-| **Builder** | `Book`, `LibraryEvent` records use Lombok `@Builder`; `ProducerRecord` construction in `LibraryEventProducer.buildProducerRecord()` |
+| **Builder**        | `Book`, `LibraryEvent` records use Lombok `@Builder`; `ProducerRecord` construction in `LibraryEventProducer.buildProducerRecord()`                 |
 
 ### Structural
-| Pattern | Where |
-|---|---|
+| Pattern       | Where                                                                                                                          |
+|---------------|--------------------------------------------------------------------------------------------------------------------------------|
 | **Decorator** | `StreamsBuilderFactoryBeanConfigurer` wraps the default `StreamsBuilderFactoryBean` to add a custom uncaught exception handler |
 
 ### Behavioural
-| Pattern | Where |
-|---|---|
-| **Strategy** | `ConsumerRecordRecoverer` in `LibraryEventsConsumerConfig.recoverer()` — swappable recovery (re-publish vs log-and-discard). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type. |
-| **Template Method** | `LibraryEventsService.processLibraryEvent()` defines the algorithm skeleton; `save()` and `validate()` are the concrete steps dispatched by event type via a switch expression. `OrdersTopology.aggregateOrdersCountAndRevenue()` is the reusable skeleton for both GENERAL and RESTAURANT branches. |
-| **Observer** | `LibraryEventsConsumer` annotated with `@KafkaListener` — Spring Kafka registers it as an observer that reacts to each Kafka record |
+| Pattern             | Where                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Strategy**        | `ConsumerRecordRecoverer` in `LibraryEventsConsumerConfig.recoverer()` — swappable recovery (re-publish vs log-and-discard). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type. |
+| **Template Method** | `LibraryEventsService.processLibraryEvent()` defines the algorithm skeleton; `save()` and `validate()` are the concrete steps dispatched by event type via a switch expression. `OrdersTopology.aggregateOrdersCountAndRevenue()` is the reusable skeleton for both GENERAL and RESTAURANT branches.                                                                                                                                                     |
+| **Observer**        | `LibraryEventsConsumer` annotated with `@KafkaListener` — Spring Kafka registers it as an observer that reacts to each Kafka record                                                                                                                                                                                                                                                                                                                      |
 
 ---
 
@@ -231,13 +231,13 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 docker compose up -d
 ```
 
-| Service | URL |
-|---|---|
-| Kafka (KRaft) | localhost:9092 |
-| Schema Registry | http://localhost:8085 |
-| Kafdrop (Kafka UI) | http://localhost:9000 |
-| Prometheus | http://localhost:9091 |
-| Grafana | http://localhost:3001 (admin/admin) |
+| Service               | URL                                   |
+|-----------------------|---------------------------------------|
+| Kafka (KRaft)         | localhost:9092                        |
+| Schema Registry       | http://localhost:8085                 |
+| Kafdrop (Kafka UI)    | http://localhost:9000                 |
+| Prometheus            | http://localhost:9091                 |
+| Grafana               | http://localhost:3001 (admin/admin)   |
 | Swagger UI (producer) | http://localhost:8080/swagger-ui.html |
 
 ### 2. Build all modules
@@ -314,11 +314,11 @@ Response `200 OK`.
 
 All modules expose Actuator endpoints:
 
-| Endpoint | Description |
-|---|---|
-| `/actuator/health` | Liveness and readiness |
+| Endpoint               | Description                      |
+|------------------------|----------------------------------|
+| `/actuator/health`     | Liveness and readiness           |
 | `/actuator/prometheus` | Prometheus metrics scrape target |
-| `/actuator/info` | Application metadata |
+| `/actuator/info`       | Application metadata             |
 
 Import `insomnia-collection.json` into Insomnia to test all endpoints including actuator.
 
