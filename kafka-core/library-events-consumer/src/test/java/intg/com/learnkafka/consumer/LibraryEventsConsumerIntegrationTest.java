@@ -41,7 +41,7 @@ import static org.mockito.Mockito.*;
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.producer.properties.enable.idempotence=false"
 })
-public class LibraryEventsConsumerIntegrationTest {
+class LibraryEventsConsumerIntegrationTest {
 
     @Autowired
     EmbeddedKafkaBroker embeddedKafkaBroker;
