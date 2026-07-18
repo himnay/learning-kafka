@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 class CoffeeOrdersServiceApplication {
 
+    /** Application entry point. */
     public static void main(String[] args) {
         SpringApplication.run(CoffeeOrdersServiceApplication.class, args);
     }

@@ -29,6 +29,7 @@ public class LibraryEventsController {
     @PostMapping("/libraryevent")
     @Operation(summary = "Publish a new library event",
             responses = {
+    /** Returns the post library event. */
                     @ApiResponse(responseCode = "201", description = "Event published"),
                     @ApiResponse(responseCode = "400", description = "Validation error")
             })
@@ -47,6 +48,7 @@ public class LibraryEventsController {
     @PutMapping("/libraryevent")
     @Operation(summary = "Update an existing library event",
             responses = {
+    /** Puts library event. */
                     @ApiResponse(responseCode = "200", description = "Event updated"),
                     @ApiResponse(responseCode = "400", description = "Missing libraryEventId or validation error")
             })

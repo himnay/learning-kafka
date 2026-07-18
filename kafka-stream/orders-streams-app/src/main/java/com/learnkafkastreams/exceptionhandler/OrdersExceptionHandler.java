@@ -14,12 +14,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class OrdersExceptionHandler {
 
+    /** Handles bad request. */
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
         log.warn("Bad request: {}", ex.getMessage());
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    /** Handles service unavailable. */
     @ExceptionHandler(IllegalStateException.class)
     public ProblemDetail handleServiceUnavailable(IllegalStateException ex) {
         log.error("Service unavailable: {}", ex.getMessage());

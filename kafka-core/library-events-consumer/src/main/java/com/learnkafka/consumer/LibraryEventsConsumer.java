@@ -18,6 +18,7 @@ public class LibraryEventsConsumer {
 
     private final LibraryEventsService libraryEventsService;
 
+    /** Handles message. */
     @KafkaListener(topics = {"library-events"}, groupId = "${spring.kafka.consumer.group-id}")
     public void onMessage(ConsumerRecord<Integer, String> consumerRecord) {
         log.info("Received ConsumerRecord : {}", consumerRecord);

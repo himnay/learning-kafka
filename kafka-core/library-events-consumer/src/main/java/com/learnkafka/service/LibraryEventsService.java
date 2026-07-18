@@ -28,6 +28,7 @@ public class LibraryEventsService {
     private final KafkaTemplate<Integer, String> kafkaTemplate;
     private final LibraryEventsRepository libraryEventsRepository;
 
+    /** Processes library event. */
     @Transactional
     public void processLibraryEvent(ConsumerRecord<Integer, String> consumerRecord) {
         LibraryEvent libraryEvent;
@@ -60,6 +61,7 @@ public class LibraryEventsService {
         log.info("Persisted libraryEvent {}", libraryEvent);
     }
 
+    /** Handles recovery. */
     public CompletableFuture<SendResult<Integer, String>> handleRecovery(
             ConsumerRecord<Integer, String> record) {
         return kafkaTemplate.sendDefault(record.key(), record.value())

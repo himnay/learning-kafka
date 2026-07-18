@@ -34,6 +34,7 @@ public class OrdersStreamsConfiguration {
     private final ConsumerRecordRecoverer logAndSkipRecoverer = (record, ex) ->
             log.error("Skipping failed record: record={} ex={}", record, ex.getMessage(), ex);
 
+    /** Defines the k stream config bean. */
     @Bean(name = KafkaStreamsDefaultConfiguration.DEFAULT_STREAMS_CONFIG_BEAN_NAME)
     public KafkaStreamsConfiguration kStreamConfig(
             @Value("${spring.kafka.streams.bootstrap-servers}") String bootstrapServers,
@@ -50,6 +51,7 @@ public class OrdersStreamsConfiguration {
         return new KafkaStreamsConfiguration(props);
     }
 
+    /** Defines the streams builder factory bean configurer bean. */
     @Bean
     public StreamsBuilderFactoryBeanConfigurer streamsBuilderFactoryBeanConfigurer() {
         return factoryBean -> {
@@ -58,11 +60,13 @@ public class OrdersStreamsConfiguration {
         };
     }
 
+    /** Defines the orders topic bean. */
     @Bean
     public NewTopic ordersTopic() {
         return TopicBuilder.name(OrdersTopology.ORDERS).partitions(2).replicas(1).build();
     }
 
+    /** Defines the stores topic bean. */
     @Bean
     public NewTopic storesTopic() {
         return TopicBuilder.name(OrdersTopology.STORES).partitions(2).replicas(1).build();

@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class LibraryEventControllerAdvice {
 
+    /** Handles validation errors. */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<String> handleValidationErrors(MethodArgumentNotValidException ex) {
         var errorMessage = ex.getBindingResult().getFieldErrors().stream()

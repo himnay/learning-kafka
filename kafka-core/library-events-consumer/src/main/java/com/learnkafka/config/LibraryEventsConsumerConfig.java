@@ -94,6 +94,7 @@ public class LibraryEventsConsumerConfig {
         };
     }
 
+    /** Defines the library events dlt bean. */
     @Bean
     public NewTopic libraryEventsDlt() {
         return TopicBuilder.name(DLT_TOPIC).partitions(3).replicas(1).build();

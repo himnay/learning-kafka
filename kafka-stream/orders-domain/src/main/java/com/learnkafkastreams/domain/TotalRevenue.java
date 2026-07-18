@@ -10,6 +10,7 @@ public record TotalRevenue(String locationId,
         this("", 0, BigDecimal.valueOf(0.0));
     }
 
+    /** Updates running revenue. */
     public TotalRevenue updateRunningRevenue(String key, Order order) {
         var newOrdersCount = this.runningOrderCount + 1;
         var newRevenue = this.runningRevenue.add(order.finalAmount());

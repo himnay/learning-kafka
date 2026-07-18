@@ -43,6 +43,7 @@ public class OrdersTopology {
     public static final String RESTAURANT_ORDERS_REVENUE_WINDOWS  = "restaurant_orders_revenue_window";
 
     // Spring Kafka Streams requires @Autowired method injection to register the topology
+    /** Processes. */
     @Autowired
     public void process(StreamsBuilder streamsBuilder) {
         orderTopology(streamsBuilder);

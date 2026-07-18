@@ -42,6 +42,7 @@ public class CoffeeOrdersProducer {
             String nickName
     ) {}
 
+    /** Publishes coffee order. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public CoffeeOrder publishCoffeeOrder(@RequestBody @Valid CoffeeOrderRequest request) {

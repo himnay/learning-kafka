@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class CoffeeOrdersConsumer {
 
+    /** Handles message. */
     @KafkaListener(topics = "coffee-orders", groupId = "${spring.kafka.consumer.group-id}")
     public void onMessage(ConsumerRecord<String, CoffeeOrder> record) {
         var order = record.value();

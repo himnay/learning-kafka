@@ -8,6 +8,7 @@ import org.springframework.kafka.annotation.EnableKafkaStreams;
 @SpringBootApplication
 class OrdersManagementStreamsApplication {
 
+	/** Application entry point. */
 	public static void main(String[] args) {
 		SpringApplication.run(OrdersManagementStreamsApplication.class, args);
 	}
