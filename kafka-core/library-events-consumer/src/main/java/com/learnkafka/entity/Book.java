@@ -16,10 +16,10 @@ import lombok.ToString;
 @Getter
 @Setter
 @Builder
-@AllArgsConstructor
-@NoArgsConstructor
-@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @ToString
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Book {
 
     @Id
@@ -29,7 +29,7 @@ public class Book {
     private String bookAuthor;
 
     @OneToOne
-    @JoinColumn(name = "libraryEventId")
     @ToString.Exclude
+    @JoinColumn(name = "libraryEventId")
     private LibraryEvent libraryEvent;
 }

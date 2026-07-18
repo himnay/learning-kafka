@@ -28,9 +28,9 @@ import org.springframework.util.backoff.FixedBackOff;
  *   - Template Method : recoverer branches on exception type (recoverable vs non-recoverable)
  *   - Factory Method  : @Bean creates the ConcurrentKafkaListenerContainerFactory
  */
-@Configuration
-@EnableKafka
 @Slf4j
+@EnableKafka
+@Configuration
 @RequiredArgsConstructor
 public class LibraryEventsConsumerConfig {
 

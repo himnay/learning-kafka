@@ -19,8 +19,8 @@ import java.util.concurrent.CompletableFuture;
  * GoF Template Method: processLibraryEvent() defines the algorithm skeleton;
  * concrete steps (save, validate) are dispatch-selected by event type.
  */
-@Service
 @Slf4j
+@Service
 @RequiredArgsConstructor
 public class LibraryEventsService {
 

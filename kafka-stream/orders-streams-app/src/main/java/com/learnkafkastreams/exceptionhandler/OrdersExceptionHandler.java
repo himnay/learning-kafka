@@ -10,8 +10,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * Maps domain exceptions to RFC 9457 ProblemDetail responses.
  * Requires spring.mvc.problemdetails.enabled: true in application.yml.
  */
-@RestControllerAdvice
 @Slf4j
+@RestControllerAdvice
 public class OrdersExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)

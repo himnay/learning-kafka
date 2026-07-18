@@ -23,8 +23,8 @@ import org.springframework.stereotype.Component;
  *    steps are extracted into aggregateOrdersCountAndRevenue() per order type.
  *  - Strategy: branching logic (GENERAL vs RESTAURANT) is a pluggable predicate.
  */
-@Component
 @Slf4j
+@Component
 public class OrdersTopology {
 
     public static final String ORDERS  = "orders";

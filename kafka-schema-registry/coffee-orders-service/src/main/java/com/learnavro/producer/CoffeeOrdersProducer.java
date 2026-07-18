@@ -27,10 +27,10 @@ import java.util.UUID;
  * REST endpoint that builds and publishes Avro-encoded CoffeeOrder events to Kafka.
  * Uses KafkaAvroSerializer (Confluent) to serialize and register schemas automatically.
  */
-@RestController
-@RequestMapping("/v1/coffee-orders")
 @Slf4j
+@RestController
 @RequiredArgsConstructor
+@RequestMapping("/v1/coffee-orders")
 public class CoffeeOrdersProducer {
 
     public static final String TOPIC = "coffee-orders";

@@ -11,8 +11,8 @@ import org.springframework.stereotype.Component;
  * Observer Pattern: Spring Kafka registers this listener as an observer on the "library-events" topic.
  * Each partition message triggers onMessage(), which delegates processing to LibraryEventsService.
  */
-@Component
 @Slf4j
+@Component
 @RequiredArgsConstructor
 public class LibraryEventsConsumer {
 

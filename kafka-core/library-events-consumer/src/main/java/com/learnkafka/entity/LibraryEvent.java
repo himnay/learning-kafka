@@ -19,10 +19,10 @@ import lombok.ToString;
 @Getter
 @Setter
 @Builder
-@AllArgsConstructor
-@NoArgsConstructor
-@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @ToString
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class LibraryEvent {
 
     @Id
@@ -33,7 +33,7 @@ public class LibraryEvent {
     @Enumerated(EnumType.STRING)
     private LibraryEventType libraryEventType;
 
-    @OneToOne(mappedBy = "libraryEvent", cascade = CascadeType.ALL)
     @ToString.Exclude
+    @OneToOne(mappedBy = "libraryEvent", cascade = CascadeType.ALL)
     private Book book;
 }

@@ -10,8 +10,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import java.util.stream.Collectors;
 
-@RestControllerAdvice
 @Slf4j
+@RestControllerAdvice
 public class LibraryEventControllerAdvice {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

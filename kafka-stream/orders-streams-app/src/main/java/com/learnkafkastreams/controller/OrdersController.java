@@ -16,10 +16,10 @@ import java.util.List;
  *
  * GoF Factory Method: ResponseEntity is produced per endpoint as a factory method result.
  */
-@RestController
-@RequestMapping("/v1/orders")
-@RequiredArgsConstructor
 @Slf4j
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/v1/orders")
 public class OrdersController {
 
     private final OrderStoreService orderStoreService;

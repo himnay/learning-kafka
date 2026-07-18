@@ -13,9 +13,9 @@ import org.springframework.stereotype.Component;
  * Activated only under the "manual-offset" Spring profile so it never conflicts
  * with the default auto-commit consumer in other profiles.
  */
+@Slf4j
 @Component
 @Profile("manual-offset")
-@Slf4j
 public class LibraryEventsConsumerManualOffset implements AcknowledgingMessageListener<Integer, String> {
 
     @Override

@@ -26,8 +26,8 @@ import java.util.stream.StreamSupport;
  * GoF Strategy: countStoreName / revenueStoreName resolve the correct store per order type,
  * making the retrieval strategy interchangeable without changing the query logic.
  */
-@Service
 @Slf4j
+@Service
 @RequiredArgsConstructor
 public class OrderStoreService {
 

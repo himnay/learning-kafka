@@ -17,11 +17,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Slf4j
 @RestController
 @RequestMapping("/v1")
-@Tag(name = "Library Events", description = "Publish library events to Kafka")
-@Slf4j
 @RequiredArgsConstructor
+@Tag(name = "Library Events", description = "Publish library events to Kafka")
 public class LibraryEventsController {
 
     private final LibraryEventProducer libraryEventProducer;

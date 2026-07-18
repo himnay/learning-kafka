@@ -17,8 +17,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-@Component
 @Slf4j
+@Component
 @RequiredArgsConstructor
 public class LibraryEventProducer {
 

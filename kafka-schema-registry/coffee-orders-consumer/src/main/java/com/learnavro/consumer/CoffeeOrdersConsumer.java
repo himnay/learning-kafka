@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
  * Observer Pattern: Spring Kafka registers this listener as an observer on the "coffee-orders" topic.
  * Confluent KafkaAvroDeserializer handles Avro deserialization and schema registry lookup.
  */
-@Component
 @Slf4j
+@Component
 public class CoffeeOrdersConsumer {
 
     @KafkaListener(topics = "coffee-orders", groupId = "${spring.kafka.consumer.group-id}")
