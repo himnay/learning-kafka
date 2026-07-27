@@ -20,7 +20,6 @@
         <module>library-events-consumer</module>
     </modules>
 
-    <!-- Shared dependencies for all kafka-core sub-modules -->
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -20,7 +20,6 @@
         <module>orders-streams-app</module>
     </modules>
 
-    <!-- Shared dependencies for all kafka-stream sub-modules -->
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>

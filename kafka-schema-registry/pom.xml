@@ -22,7 +22,6 @@
         <module>coffee-orders-consumer</module>
     </modules>
 
-    <!-- Shared dependencies for all schema-registry sub-modules -->
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>

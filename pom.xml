@@ -25,11 +25,9 @@
     </modules>
 
     <properties>
-        <!-- Override super-pom default (21) — Kafka modules require Java 25 -->
         <java.version>25</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
 
-        <!-- Build plugin versions -->
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
     </properties>
@@ -55,10 +53,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven-surefire-plugin.version}</version>
                 <configuration>
-                    <!-- Mockito needs experimental mode for Java 25 class version -->
                     <argLine>-Dnet.bytebuddy.experimental=true -Dapi.version=1.41</argLine>
                     <environmentVariables>
-                        <!-- Docker Desktop on Mac uses a non-standard socket -->
                         <DOCKER_HOST>unix://${user.home}/.docker/run/docker.sock</DOCKER_HOST>
                         <TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE>${user.home}/.docker/run/docker.sock</TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE>
                         <DOCKER_API_VERSION>1.41</DOCKER_API_VERSION>
