@@ -1,8 +1,8 @@
-# <span style="color:hsl(180,68%,36%)">Enabling SSL in Kafka</span>
+# <span style="color:hsl(180,80%,58%)">Enabling SSL in Kafka</span>
 
 - Follow the below steps for enabling SSL in your local environment
 
-## <span style="color:hsl(206,68%,44%)">Generating the KeyStore</span>
+## <span style="color:hsl(318,80%,58%)">Generating the KeyStore</span>
 
 - The below command is to generate the **keyStore**.
 - KeyStore in general has information about the server and the organization
@@ -18,7 +18,7 @@ keytool -keystore server.keystore.jks -alias localhost -validity 365 -genkey -ke
 CN=localhost, OU=localhost, O=localhost, L=Chennai, ST=TN, C=IN
 ```
 
-## <span style="color:hsl(231,68%,44%)">Generating CA</span>
+## <span style="color:hsl(95,80%,58%)">Generating CA</span>
 
 - The below command will generate the ca cert(SSL cert) and private key. This is normally needed if we are self signing the request.
 
@@ -26,7 +26,7 @@ CN=localhost, OU=localhost, O=localhost, L=Chennai, ST=TN, C=IN
 openssl req -new -x509 -keyout ca-key -out ca-cert -days 365 -subj "/CN=local-security-CA"
 ```
 
-## <span style="color:hsl(257,68%,44%)">Certificate Signing Request(CSR)</span>
+## <span style="color:hsl(233,80%,58%)">Certificate Signing Request(CSR)</span>
 
 - The below command will create a **cert-file** as a result of executing the command.
 
@@ -34,7 +34,7 @@ openssl req -new -x509 -keyout ca-key -out ca-cert -days 365 -subj "/CN=local-se
 keytool -keystore server.keystore.jks -alias localhost -certreq -file cert-file
 ```
 
-## <span style="color:hsl(283,68%,44%)">Signing the certificate</span>
+## <span style="color:hsl(10,80%,58%)">Signing the certificate</span>
 
 - The below command takes care of signing the CSR and then it spits out a file **cert-signed**
 
@@ -49,14 +49,14 @@ keytool -printcert -v -file cert-signed
 ```
 
 
-## <span style="color:hsl(309,68%,44%)">Adding the Signed Cert in to the KeyStore file</span>
+## <span style="color:hsl(148,80%,58%)">Adding the Signed Cert in to the KeyStore file</span>
 
 ```
 keytool -keystore server.keystore.jks -alias CARoot -import -file ca-cert
 keytool -keystore server.keystore.jks -alias localhost -import -file cert-signed
 ```
 
-## <span style="color:hsl(334,68%,44%)">Generate the TrustStore</span>
+## <span style="color:hsl(285,80%,58%)">Generate the TrustStore</span>
 
 - The below command takes care of generating the truststore for us and adds the **CA-Cert** in to it.
 - This is to make sure the client is going to trust all the certs issued by CA.
@@ -65,7 +65,7 @@ keytool -keystore server.keystore.jks -alias localhost -import -file cert-signed
 keytool -keystore client.truststore.jks -alias CARoot -import -file ca-cert
 ```
 
-## <span style="color:hsl(0,68%,44%)">Broker SSL Settings</span>
+## <span style="color:hsl(63,80%,50%)">Broker SSL Settings</span>
 
 ```
 ssl.keystore.location=<location>/server.keystore.jks
@@ -73,7 +73,7 @@ ssl.keystore.password=password
 ssl.key.password=password
 ssl.endpoint.identification.algorithm=
 ```
-# <span style="color:hsl(26,68%,44%)">Accessing SSL Enabled Topics using Console Producers/Consumers</span>
+# <span style="color:hsl(200,80%,58%)">Accessing SSL Enabled Topics using Console Producers/Consumers</span>
 
 - Create a topic
 
@@ -90,7 +90,7 @@ ssl.truststore.password=password
 ssl.truststore.type=JKS
 ```
 
-## <span style="color:hsl(51,68%,32%)">Producing Messages to Secured Topic</span>
+## <span style="color:hsl(338,80%,58%)">Producing Messages to Secured Topic</span>
 
 - Command to Produce Messages to the secured topic
 
@@ -98,7 +98,7 @@ ssl.truststore.type=JKS
 ./kafka-console-producer.sh --broker-list localhost:9095,localhost:9096,localhost:9097 --topic test-topic --producer.config client-ssl.properties
 ```
 
-## <span style="color:hsl(77,68%,32%)">Consuming Messages from a Secured Topic</span>
+## <span style="color:hsl(115,80%,58%)">Consuming Messages from a Secured Topic</span>
 
 - Command to Produce Messages to the secured topic
 
@@ -107,20 +107,20 @@ ssl.truststore.type=JKS
 ```
 
 
-## <span style="color:hsl(103,68%,32%)">Producing Messages to Non-Secured Topic</span>
+## <span style="color:hsl(253,80%,58%)">Producing Messages to Non-Secured Topic</span>
 
 ```
 ./kafka-console-producer.sh --broker-list localhost:9092,localhost:9093,localhost:9094 --topic test-topic
 ```
 
 
-## <span style="color:hsl(129,68%,32%)">Consuming Messages from a Non-Secured Topic</span>
+## <span style="color:hsl(30,80%,58%)">Consuming Messages from a Non-Secured Topic</span>
 
 ```
 ./kafka-console-consumer.sh --bootstrap-server localhost:9092,localhost:9093,localhost:9094 --topic test-topic
 ```
 
-## <span style="color:hsl(154,68%,36%)">2 Way Authentication</span>
+## <span style="color:hsl(168,80%,58%)">2 Way Authentication</span>
 
 - This config is to enable the client authentication at the cluster end.
 

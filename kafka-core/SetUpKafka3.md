@@ -1,11 +1,11 @@
-# <span style="color:hsl(142,68%,32%)">Setting Up Kafka 3.0.0</span>
+# <span style="color:hsl(142,80%,58%)">Setting Up Kafka 3.0.0</span>
 
 <details><summary>Mac</summary>
 <p>
 
 - Make sure you are navigated inside the bin directory.
 
-## <span style="color:hsl(152,68%,36%)">Start Zookeeper and Kafka Broker</span>
+## <span style="color:hsl(280,80%,58%)">Start Zookeeper and Kafka Broker</span>
 
 -   Start up the Zookeeper.
 
@@ -26,41 +26,41 @@ auto.create.topics.enable=false
 ./kafka-server-start.sh ../config/server.properties
 ```
 
-## <span style="color:hsl(161,68%,36%)">How to create a topic ?</span>
+## <span style="color:hsl(57,80%,50%)">How to create a topic ?</span>
 
 ```
 ./kafka-topics.sh --create --topic test-topic --replication-factor 1 --partitions 4 --bootstrap-server localhost:9092
 ```
 
-## <span style="color:hsl(171,68%,36%)">How to instantiate a Console Producer?</span>
+## <span style="color:hsl(195,80%,58%)">How to instantiate a Console Producer?</span>
 
-### <span style="color:hsl(181,68%,36%)">Without Key</span>
+### <span style="color:hsl(332,80%,58%)">Without Key</span>
 
 ```
 ./kafka-console-producer.sh --broker-list localhost:9092 --topic test-topic
 ```
 
-### <span style="color:hsl(191,68%,36%)">With Key</span>
+### <span style="color:hsl(110,80%,58%)">With Key</span>
 
 ```
 ./kafka-console-producer.sh --broker-list localhost:9092 --topic test-topic --property "key.separator=-" --property "parse.key=true"
 ```
 
-## <span style="color:hsl(200,68%,44%)">How to instantiate a Console Consumer?</span>
+## <span style="color:hsl(247,80%,58%)">How to instantiate a Console Consumer?</span>
 
-### <span style="color:hsl(210,68%,44%)">Without Key</span>
+### <span style="color:hsl(25,80%,58%)">Without Key</span>
 
 ```
 ./kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test-topic --from-beginning
 ```
 
-### <span style="color:hsl(220,68%,44%)">With Key</span>
+### <span style="color:hsl(162,80%,58%)">With Key</span>
 
 ```
 ./kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test-topic --from-beginning -property "key.separator= - " --property "print.key=true"
 ```
 
-### <span style="color:hsl(230,68%,44%)">With Consumer Group</span>
+### <span style="color:hsl(300,80%,58%)">With Consumer Group</span>
 
 ```
 ./kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test-topic --group <group-name>
@@ -74,7 +74,7 @@ auto.create.topics.enable=false
 
 - Make sure you are inside the **bin/windows** directory.
 
-## <span style="color:hsl(239,68%,44%)">Start Zookeeper and Kafka Broker</span>
+## <span style="color:hsl(77,80%,58%)">Start Zookeeper and Kafka Broker</span>
 
 -   Start up the Zookeeper.
 
@@ -88,41 +88,41 @@ zookeeper-server-start.bat ..\..\config\zookeeper.properties
 kafka-server-start.bat ..\..\config\server.properties
 ```
 
-## <span style="color:hsl(249,68%,44%)">How to create a topic ?</span>
+## <span style="color:hsl(215,80%,58%)">How to create a topic ?</span>
 
 ```
 kafka-topics.bat --create --topic test-topic  --replication-factor 1 --partitions 4 --bootstrap-server localhost:9092
 ```
 
-## <span style="color:hsl(259,68%,44%)">How to instantiate a Console Producer?</span>
+## <span style="color:hsl(352,80%,58%)">How to instantiate a Console Producer?</span>
 
-### <span style="color:hsl(268,68%,44%)">Without Key</span>
+### <span style="color:hsl(130,80%,58%)">Without Key</span>
 
 ```
 kafka-console-producer.bat --broker-list localhost:9092 --topic test-topic
 ```
 
-### <span style="color:hsl(278,68%,44%)">With Key</span>
+### <span style="color:hsl(267,80%,58%)">With Key</span>
 
 ```
 kafka-console-producer.bat --broker-list localhost:9092 --topic test-topic --property "key.separator=-" --property "parse.key=true"
 ```
 
-## <span style="color:hsl(288,68%,44%)">How to instantiate a Console Consumer?</span>
+## <span style="color:hsl(45,80%,58%)">How to instantiate a Console Consumer?</span>
 
-### <span style="color:hsl(298,68%,44%)">Without Key</span>
+### <span style="color:hsl(182,80%,58%)">Without Key</span>
 
 ```
 kafka-console-consumer.bat --bootstrap-server localhost:9092 --topic test-topic --from-beginning
 ```
 
-### <span style="color:hsl(307,68%,44%)">With Key</span>
+### <span style="color:hsl(320,80%,58%)">With Key</span>
 
 ```
 kafka-console-consumer.bat --bootstrap-server localhost:9092 --topic test-topic --from-beginning -property "key.separator= - " --property "print.key=true"
 ```
 
-### <span style="color:hsl(317,68%,44%)">With Consumer Group</span>
+### <span style="color:hsl(97,80%,58%)">With Consumer Group</span>
 
 ```
 kafka-console-consumer.bat --bootstrap-server localhost:9092 --topic test-topic --group <group-name>
@@ -131,7 +131,7 @@ kafka-console-consumer.bat --bootstrap-server localhost:9092 --topic test-topic 
 
 </details>
 
-## <span style="color:hsl(327,68%,44%)">Setting Up Multiple Kafka Brokers</span>
+## <span style="color:hsl(235,80%,58%)">Setting Up Multiple Kafka Brokers</span>
 
 - The first step is to add a new **server.properties**.
 
@@ -153,7 +153,7 @@ log.dirs=/tmp/kafka-logs-1
 auto.create.topics.enable=false
 ```
 
-### <span style="color:hsl(337,68%,44%)">Starting up the new Broker</span>
+### <span style="color:hsl(12,80%,58%)">Starting up the new Broker</span>
 
 - Provide the new **server.properties** thats added.
 
@@ -165,18 +165,18 @@ auto.create.topics.enable=false
 ./kafka-server-start.sh ../config/server-2.properties
 ```
 
-# <span style="color:hsl(346,68%,44%)">Advanced Kafka CLI operations:</span>
+# <span style="color:hsl(150,80%,58%)">Advanced Kafka CLI operations:</span>
 
 <details><summary>Mac</summary>
 <p>
 
-## <span style="color:hsl(356,68%,44%)">List the topics in a cluster</span>
+## <span style="color:hsl(287,80%,58%)">List the topics in a cluster</span>
 
 ```
 ./kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
-## <span style="color:hsl(6,68%,44%)">Describe topic</span>
+## <span style="color:hsl(65,80%,50%)">Describe topic</span>
 
 - The below command can be used to describe all the topics.
 
@@ -190,35 +190,35 @@ auto.create.topics.enable=false
 ./kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic <topic-name>
 ```
 
-## <span style="color:hsl(16,68%,44%)">Alter the min insync replica</span>
+## <span style="color:hsl(202,80%,58%)">Alter the min insync replica</span>
 ```
 ./kafka-configs.sh  --bootstrap-server localhost:9092 --entity-type topics --entity-name library-events --alter --add-config min.insync.replicas=2
 ```
 
-## <span style="color:hsl(25,68%,44%)">Delete a topic</span>
+## <span style="color:hsl(340,80%,58%)">Delete a topic</span>
 
 ```
 ./kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic test-topic
 ```
-## <span style="color:hsl(35,68%,44%)">How to view consumer groups</span>
+## <span style="color:hsl(117,80%,58%)">How to view consumer groups</span>
 
 ```
 ./kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
 ```
 
-### <span style="color:hsl(45,68%,32%)">Consumer Groups and their Offset</span>
+### <span style="color:hsl(255,80%,58%)">Consumer Groups and their Offset</span>
 
 ```
 ./kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group console-consumer-27773
 ```
 
-## <span style="color:hsl(54,68%,32%)">Viewing the Commit Log</span>
+## <span style="color:hsl(32,80%,58%)">Viewing the Commit Log</span>
 
 ```
 ./kafka-run-class.sh kafka.tools.DumpLogSegments --deep-iteration --files /tmp/kafka-logs/test-topic-0/00000000000000000000.log
 ```
 
-## <span style="color:hsl(64,68%,32%)">Setting the Minimum Insync Replica</span>
+## <span style="color:hsl(170,80%,58%)">Setting the Minimum Insync Replica</span>
 
 ```
 ./kafka-configs.sh --alter --bootstrap-server localhost:9092 --entity-type topics --entity-name test-topic --add-config min.insync.replicas=2
@@ -232,13 +232,13 @@ auto.create.topics.enable=false
 
 - Make sure you are inside the **bin/windows** directory.
 
-## <span style="color:hsl(74,68%,32%)">List the topics in a cluster</span>
+## <span style="color:hsl(307,80%,58%)">List the topics in a cluster</span>
 
 ```
 kafka-topics.bat --bootstrap-server localhost:9092 --list
 ```
 
-## <span style="color:hsl(84,68%,32%)">Describe topic</span>
+## <span style="color:hsl(85,80%,58%)">Describe topic</span>
 
 - The below command can be used to describe all the topics.
 
@@ -252,32 +252,32 @@ kafka-topics.bat --bootstrap-server localhost:9092 --describe
 kafka-topics.bat --bootstrap-server localhost:9092 --describe --topic <topic-name>
 ```
 
-## <span style="color:hsl(93,68%,32%)">Alter the min insync replica</span>
+## <span style="color:hsl(222,80%,58%)">Alter the min insync replica</span>
 ```
 kafka-configs.bat --bootstrap-server localhost:9092 --entity-type topics --entity-name library-events --alter --add-config min.insync.replicas=2
 ```
 
 
-## <span style="color:hsl(103,68%,32%)">Delete a topic</span>
+## <span style="color:hsl(360,80%,58%)">Delete a topic</span>
 
 ```
 kafka-topics.bat --bootstrap-server localhost:9092 --delete --topic <topic-name>
 ```
 
 
-## <span style="color:hsl(113,68%,32%)">How to view consumer groups</span>
+## <span style="color:hsl(137,80%,58%)">How to view consumer groups</span>
 
 ```
 kafka-consumer-groups.bat --bootstrap-server localhost:9092 --list
 ```
 
-### <span style="color:hsl(123,68%,32%)">Consumer Groups and their Offset</span>
+### <span style="color:hsl(275,80%,58%)">Consumer Groups and their Offset</span>
 
 ```
 kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group console-consumer-27773
 ```
 
-## <span style="color:hsl(132,68%,32%)">Viewing the Commit Log</span>
+## <span style="color:hsl(52,80%,50%)">Viewing the Commit Log</span>
 
 ```
 kafka-run-class.bat kafka.tools.DumpLogSegments --deep-iteration --files /tmp/kafka-logs/test-topic-0/00000000000000000000.log
