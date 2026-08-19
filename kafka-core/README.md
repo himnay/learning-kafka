@@ -1,4 +1,4 @@
-# kafka-core — Library Events Producer & Consumer
+# <span style="color:hsl(92,68%,32%)">kafka-core — Library Events Producer & Consumer</span>
 
 This module is the "plain Kafka" half of the repo — no Avro, no Streams, just a REST-facing producer, a JSON-over-Kafka event, and a consumer with retry/dead-letter handling built on Spring Kafka's `DefaultErrorHandler`. It is the best place to start if you want to see the fundamentals: producer records, consumer groups, offsets, and what "at-least-once delivery" actually looks like in application code.
 
@@ -6,7 +6,7 @@ For the broader repo architecture and core Kafka vocabulary, see the [root READM
 
 ---
 
-## Modules
+## <span style="color:hsl(122,68%,32%)">Modules</span>
 
 ```
 kafka-core/
@@ -16,7 +16,7 @@ kafka-core/
 
 ---
 
-## The event: `LibraryEvent`
+## <span style="color:hsl(152,68%,36%)">The event: `LibraryEvent`</span>
 
 Both sides define their own copy of the shape (a `record` on the producer side annotated with Bean Validation, a JPA `@Entity` on the consumer side) — they are *not* a shared library dependency. This is a deliberate, common real-world pattern: producer and consumer evolve independently and only agree on the **wire format** (JSON), not a shared Java type. The cost is that a field rename on one side silently breaks the other at runtime instead of at compile time — one of the reasons the `kafka-schema-registry` module exists to show the Avro alternative, which enforces compatibility at publish time instead.
 
@@ -50,7 +50,7 @@ The **key** is `libraryEventId` (an `Integer`, serialized with `IntegerSerialize
 
 ---
 
-## Producer side: `LibraryEventProducer`
+## <span style="color:hsl(182,68%,36%)">Producer side: `LibraryEventProducer`</span>
 
 Three send methods, each demonstrating a different Spring Kafka `KafkaTemplate` usage pattern:
 
@@ -62,7 +62,7 @@ Three send methods, each demonstrating a different Spring Kafka `KafkaTemplate` 
 
 `LibraryEventsController` calls `sendLibraryEventWithHeaders()` for both `POST` (sets `LibraryEventType.NEW`) and `PUT` (sets `LibraryEventType.UPDATE`, and 400s if `libraryEventId` is missing) and returns `201`/`200` to the HTTP caller **without waiting for the Kafka send to complete** — the send's success/failure is only observed by the `whenComplete()` callback (`handleSuccess` / `handleFailure`), which just logs. This is a fire-and-forget-from-the-HTTP-caller's-perspective design: the REST API's availability is decoupled from Kafka's availability, at the cost of the HTTP response not reflecting whether the message actually made it onto the topic.
 
-### Producer reliability configuration (`application.yml`, `local` profile)
+### <span style="color:hsl(212,68%,44%)">Producer reliability configuration (`application.yml`, `local` profile)</span>
 
 ```yaml
 spring.kafka.producer.properties:
@@ -78,7 +78,7 @@ spring.kafka.producer.properties:
 
 ---
 
-## Consumer side: `LibraryEventsConsumer` → `LibraryEventsService`
+## <span style="color:hsl(242,68%,44%)">Consumer side: `LibraryEventsConsumer` → `LibraryEventsService`</span>
 
 ```java
 @KafkaListener(topics = {"library-events"}, groupId = "${spring.kafka.consumer.group-id}")
@@ -104,7 +104,7 @@ private void validate(LibraryEvent libraryEvent) {
 
 An `UPDATE` for an id that was never `save()`d as `NEW` (or has a null id) is not a *transient* problem — retrying it will fail identically every time. That's exactly why it's modeled as `IllegalArgumentException` and excluded from retry (below) rather than left to burn through backoff attempts for no benefit.
 
-### Error handling: `LibraryEventsConsumerConfig`
+### <span style="color:hsl(272,68%,44%)">Error handling: `LibraryEventsConsumerConfig`</span>
 
 This is the heart of the module's "how do you *actually* handle consumer failures" story. Spring Kafka's `DefaultErrorHandler` wraps a `BackOff` policy and a `ConsumerRecordRecoverer`:
 
@@ -136,7 +136,7 @@ t=2s      still failing → recoverer() invoked
 
 Only after the recoverer completes does the container commit the offset for that record and move on to the next one — the partition is *not* blocked indefinitely by a poison message, which is the entire point of a dead-letter topic.
 
-### Manual offset commits — `LibraryEventsConsumerManualOffset`
+### <span style="color:hsl(302,68%,44%)">Manual offset commits — `LibraryEventsConsumerManualOffset`</span>
 
 A second, intentionally minimal listener (`@Profile("manual-offset")`, so it never runs alongside the default auto-commit listener) demonstrates the other end of the offset-commit spectrum:
 
@@ -151,7 +151,7 @@ With `AcknowledgingMessageListener` + `MANUAL_IMMEDIATE` ack mode, the framework
 
 ---
 
-## Delivery semantics in this module, concretely
+## <span style="color:hsl(332,68%,44%)">Delivery semantics in this module, concretely</span>
 
 Combining the producer and consumer configuration above:
 
@@ -161,7 +161,7 @@ Combining the producer and consumer configuration above:
 
 ---
 
-## Running just this module
+## <span style="color:hsl(2,68%,44%)">Running just this module</span>
 
 ```bash
 # Terminal 1
@@ -176,7 +176,7 @@ mvn spring-boot:run -pl kafka-core/library-events-consumer -Dspring-boot.run.pro
 
 Requires the root `docker-compose.yml` stack running (`docker compose up -d` from the repo root) for Kafka + Kafdrop.
 
-### Inspecting the dead-letter topic
+### <span style="color:hsl(32,68%,44%)">Inspecting the dead-letter topic</span>
 
 Via Kafdrop (http://localhost:9000) or the CLI:
 
@@ -188,7 +188,7 @@ docker exec -it kafka kafka-console-consumer \
   --property print.key=true
 ```
 
-### Tests
+### <span style="color:hsl(62,68%,32%)">Tests</span>
 
 - `LibraryEventsControllerIntegrationTest` / `LibraryEventControllerUnitTest` / `LibraryEventProducerUnitTest` (producer module) — REST layer and producer unit coverage.
 - `LibraryEventsConsumerIntegrationTest` (consumer module) — `@EmbeddedKafka`-backed test that publishes NEW/UPDATE events and asserts the consumer spy, service spy, and H2 repository state, including the "update with unknown id is consumed but not persisted" case that exercises the non-retryable `IllegalArgumentException` path.

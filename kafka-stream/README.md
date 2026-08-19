@@ -1,4 +1,4 @@
-# kafka-stream — Orders Count & Revenue Topology
+# <span style="color:hsl(69,68%,32%)">kafka-stream — Orders Count & Revenue Topology</span>
 
 This module is a Kafka Streams application (`orders-streams-app`, wired via Spring Kafka's `@EnableKafkaStreams`) that continuously aggregates order counts and running revenue **per store, per order type**, materializes the results into queryable local state stores, and exposes them over a REST API for interactive queries. It's the "derive live materialized views from an event stream" half of the repo, in contrast to the request/reply style of `kafka-core` and `kafka-schema-registry`.
 
@@ -6,7 +6,7 @@ For the broader repo architecture, see the [root README](../README.md).
 
 ---
 
-## Modules
+## <span style="color:hsl(105,68%,32%)">Modules</span>
 
 ```
 kafka-stream/
@@ -18,7 +18,7 @@ kafka-stream/
 
 ---
 
-## Why Kafka Streams — stream processing vs. request/reply
+## <span style="color:hsl(141,68%,32%)">Why Kafka Streams — stream processing vs. request/reply</span>
 
 `kafka-core`'s consumer reacts to one record at a time and writes to a database on the side. Kafka Streams instead treats the topic itself as the source of truth and continuously folds it into **state** — a `KTable` or an aggregation result — that lives inside the application (backed by RocksDB by default, changelog-replicated to Kafka for fault tolerance) and can be queried directly, with no separate database. The core abstractions this topology uses:
 
@@ -28,7 +28,7 @@ kafka-stream/
 
 ---
 
-## The topology, end to end (`OrdersTopology.java`)
+## <span style="color:hsl(177,68%,36%)">The topology, end to end (`OrdersTopology.java`)</span>
 
 ```mermaid
 flowchart TD
@@ -67,7 +67,7 @@ Step by step, matching the actual code in `orderTopology()` / `aggregateOrdersCo
    - `.count()`, materialized as `<orderType>_orders_count` — a running count of orders per store.
    - `.aggregate(TotalRevenue::new, (key, order, aggregate) -> aggregate.updateRunningRevenue(key, order))`, materialized as `<orderType>_orders_revenue` — folds `order.finalAmount()` into a running `TotalRevenue(locationId, runningOrderCount, runningRevenue)` per store.
 
-### The four materialized state stores
+### <span style="color:hsl(213,68%,44%)">The four materialized state stores</span>
 
 | Store name                  | Constant                    | Keyed by     | Value                                                         |
 |-----------------------------|-----------------------------|--------------|---------------------------------------------------------------|
@@ -78,7 +78,7 @@ Step by step, matching the actual code in `orderTopology()` / `aggregateOrdersCo
 
 Constants also exist for windowed variants (`GENERAL_ORDERS_COUNT_WINDOWS`, `RESTAURANT_ORDERS_REVENUE_WINDOWS`, etc.) and corresponding DTOs (`OrdersCountPerStoreByWindowsDTO`, `OrdersRevenuePerStoreByWindowsDTO`) exist in `orders-domain`, but the current `orderTopology()` only builds the non-windowed count/revenue aggregations shown above — the windowed constants are declared for a future `windowedBy(...)` step that isn't wired into the topology yet.
 
-### What `OrdersTopologyTest` actually verifies
+### <span style="color:hsl(249,68%,44%)">What `OrdersTopologyTest` actually verifies</span>
 
 `OrdersTopologyTest` uses `TopologyTestDriver` (an in-memory topology test harness — no broker, no Spring context) to drive the exact topology above and assert against the real state stores:
 
@@ -90,7 +90,7 @@ Constants also exist for windowed variants (`GENERAL_ORDERS_COUNT_WINDOWS`, `RES
 
 ---
 
-## Error handling: three independent handlers for three independent failure modes
+## <span style="color:hsl(285,68%,44%)">Error handling: three independent handlers for three independent failure modes</span>
 
 Kafka Streams distinguishes deserialization errors, in-topology processing errors, and serialization errors — each has its own pluggable handler in this module, configured in `OrdersStreamsConfiguration`:
 
@@ -105,7 +105,7 @@ Note what this module does **not** do: unlike `library-events-consumer` in `kafk
 
 ---
 
-## Interactive queries: `OrderStoreService` + `OrdersController`
+## <span style="color:hsl(321,68%,44%)">Interactive queries: `OrderStoreService` + `OrdersController`</span>
 
 Kafka Streams' state stores are normally private to the stream-processing instance that owns their partitions. Spring's `StreamsBuilderFactoryBean` exposes the running `KafkaStreams` instance, and `OrderStoreService` uses `KafkaStreams.store(StoreQueryParameters...)` to obtain a **read-only** view of a named store directly from the JVM heap/RocksDB — no round-trip through Kafka, no separate database.
 
@@ -123,7 +123,7 @@ Kafka Streams' state stores are normally private to the stream-processing instan
 
 ---
 
-## Running just this module
+## <span style="color:hsl(357,68%,44%)">Running just this module</span>
 
 ```bash
 docker compose up -d                                              # from repo root — Kafka + Kafdrop
@@ -152,7 +152,7 @@ curl http://localhost:8082/v1/orders/revenue/general/location/store_1234
 curl http://localhost:8082/v1/orders/count/all
 ```
 
-### Tests
+### <span style="color:hsl(33,68%,44%)">Tests</span>
 
 ```bash
 mvn test -pl kafka-stream/orders-streams-app

@@ -1,4 +1,4 @@
-# kafka-schema-registry — Avro + Confluent Schema Registry
+# <span style="color:hsl(203,68%,44%)">kafka-schema-registry — Avro + Confluent Schema Registry</span>
 
 This module replaces the "producer and consumer each hand-roll their own JSON shape" approach used in `kafka-core` (see [`../kafka-core/README.md`](../kafka-core/README.md)) with **Avro schemas registered in a central Schema Registry**. The payoff: the registry can *reject* a schema change that would break existing consumers, instead of the break only surfacing at runtime as a deserialization failure.
 
@@ -6,7 +6,7 @@ For the broader repo architecture, see the [root README](../README.md).
 
 ---
 
-## Modules
+## <span style="color:hsl(236,68%,44%)">Modules</span>
 
 ```
 kafka-schema-registry/
@@ -17,7 +17,7 @@ kafka-schema-registry/
 
 ---
 
-## Why Avro + Schema Registry instead of JSON
+## <span style="color:hsl(268,68%,44%)">Why Avro + Schema Registry instead of JSON</span>
 
 With plain JSON (as in `kafka-core`), the "schema" is only ever the Java class the producer happened to serialize with `ObjectMapper`, and consumers just hope their own copy of that shape still matches. Nothing prevents a producer from renaming a field and shipping — the failure shows up as a deserialization exception (or worse, silently-wrong data) on the consumer side, in production.
 
@@ -30,7 +30,7 @@ Avro + Schema Registry changes the contract:
 
 ---
 
-## The domain: coffee orders
+## <span style="color:hsl(301,68%,44%)">The domain: coffee orders</span>
 
 All schemas live in `schemas/src/main/avro/`. `avro-maven-plugin` (configured in `schemas/pom.xml`) compiles them to `target/generated-sources/avro` at build time — nothing is hand-written or checked in under `src/main/java` for the generated classes, so `mvn clean` truly cleans them.
 
@@ -71,7 +71,7 @@ Two things worth calling out in the actual `.avsc` files:
 - **Logical types**: `CoffeeOrder.id` is declared `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}` — Avro logical types let the generated Java classes expose idiomatic `UUID` and `Instant` getters/setters (see `CoffeeOrdersProducer.buildCoffeeOrder()`, which calls `.setId(UUID.randomUUID())` and `.setOrderedTime(Instant.now())` directly) while the wire format stays a plain string/long. `OrderLineItem.cost` similarly uses a `bytes` logical `decimal` type (precision 3, scale 2) so `BigDecimal` round-trips exactly instead of losing precision through a floating-point type — the `avro-maven-plugin` config explicitly turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
 - **A separate schema not yet wired to any producer/consumer**: `CoffeeUpdateEvent.avsc` defines `{id, status}` with a `status` enum of `PROCESSING | READY_FOR_PICK_UP` — a smaller, order-status-only event shape. It compiles alongside the others but no Java code in `coffee-orders-service` / `coffee-orders-consumer` currently produces or consumes it; it's present in the schemas module as a second, independently-versioned subject (`CoffeeUpdateEvent-value` if published), illustrating that a Schema Registry instance manages compatibility **per subject**, not globally — evolving `CoffeeOrder` has no bearing on `CoffeeUpdateEvent`'s compatibility rules.
 
-### Schema evolution and compatibility modes — how the defaults in these schemas are *already* evolution-safe
+### <span style="color:hsl(334,68%,44%)">Schema evolution and compatibility modes — how the defaults in these schemas are *already* evolution-safe</span>
 
 Confluent Schema Registry's default compatibility mode for a new subject is **`BACKWARD`**: a new schema version is accepted only if messages written with the *new* schema can still be read by consumers using the *previous* schema's reader — concretely, that means new fields must supply a `default`, and only fields with defaults may be dropped.
 
@@ -97,7 +97,7 @@ A concrete evolution exercise you can try against this codebase: add a new requi
 
 ---
 
-## Producer: `CoffeeOrdersProducer`
+## <span style="color:hsl(7,68%,44%)">Producer: `CoffeeOrdersProducer`</span>
 
 ```java
 private final KafkaTemplate<String, CoffeeOrder> kafkaTemplate;   // value type is the *generated Avro class*, not a String
@@ -117,7 +117,7 @@ spring.kafka.producer:
 
 `POST /v1/coffee-orders` (`CoffeeOrdersProducer.CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, real `UUID.randomUUID()` id, `Instant.now()` ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the resulting partition on success via the same async `whenComplete()` pattern used in `kafka-core`.
 
-## Consumer: `CoffeeOrdersConsumer`
+## <span style="color:hsl(39,68%,44%)">Consumer: `CoffeeOrdersConsumer`</span>
 
 ```yaml
 spring.kafka.consumer:
@@ -132,7 +132,7 @@ spring.kafka.consumer:
 
 ---
 
-## Message flow
+## <span style="color:hsl(72,68%,32%)">Message flow</span>
 
 ```mermaid
 sequenceDiagram
@@ -163,7 +163,7 @@ sequenceDiagram
 
 ---
 
-## Running just this module
+## <span style="color:hsl(105,68%,32%)">Running just this module</span>
 
 The root `docker-compose.yml` (repo root) runs Kafka in KRaft mode plus Schema Registry on **port 8085** — that's what both modules' `local` profile `application.yml` point at.
 
@@ -175,7 +175,7 @@ mvn spring-boot:run -pl kafka-schema-registry/coffee-orders-consumer    # port 8
 
 > Note: this module also ships its own standalone `kafka-schema-registry/docker-compose.yaml`, which brings up an older **Zookeeper-mode** broker (`cp-server:7.1.0` + `cp-zookeeper`) with Schema Registry on port **8081** instead of 8085. It predates the root KRaft-based compose file and is kept for reference — prefer the root `docker-compose.yml` for a consistent setup across all modules in this repo.
 
-### Try it
+### <span style="color:hsl(138,68%,32%)">Try it</span>
 
 ```bash
 curl -X POST http://localhost:8083/v1/coffee-orders \
@@ -185,7 +185,7 @@ curl -X POST http://localhost:8083/v1/coffee-orders \
 
 Then watch `coffee-orders-consumer`'s logs for the `Received CoffeeOrder: id=... name='Ada' status=NEW store=1` line.
 
-### Inspecting the registered schema
+### <span style="color:hsl(170,68%,36%)">Inspecting the registered schema</span>
 
 ```bash
 curl http://localhost:8085/subjects

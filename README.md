@@ -1,8 +1,8 @@
-# Learning Kafka
+# <span style="color:hsl(339,68%,44%)">Learning Kafka</span>
 
 <img src="image/apache-kafka-logo.png" alt="Apache Kafka" width="90"/>
 
-## Table of contents
+## <span style="color:hsl(350,68%,44%)">Table of contents</span>
 
 1. 🏗️ [Project Structure](#project-structure)
 2. 📨 [Part 1 — Core Kafka Concepts](#part-1--core-kafka-concepts-grounded-in-this-codebase)
@@ -22,7 +22,7 @@ This document is a **conceptual deep-dive** — it explains *why* Kafka is shape
 ---
 
 <a id="project-structure"></a>
-## 1. 🏗️ Project Structure
+## <span style="color:hsl(1,68%,44%)">1. 🏗️ Project Structure</span>
 
 ```
 learning-kafka/                       ← root POM (spring-boot-starter-parent)
@@ -41,11 +41,11 @@ learning-kafka/                       ← root POM (spring-boot-starter-parent)
 ---
 
 <a id="part-1--core-kafka-concepts-grounded-in-this-codebase"></a>
-## 2. 📨 Part 1 — Core Kafka Concepts, Grounded in This Codebase
+## <span style="color:hsl(12,68%,44%)">2. 📨 Part 1 — Core Kafka Concepts, Grounded in This Codebase</span>
 
 Kafka is a distributed, append-only, partitioned commit log. Everything else — topics, consumer groups, delivery guarantees, Streams, Schema Registry — is built on top of that one idea. The sections below explain the core vocabulary and immediately point at the line of code in this repository that exercises it.
 
-### Topics and partitions
+### <span style="color:hsl(23,68%,44%)">Topics and partitions</span>
 
 A **topic** is a named, ordered, immutable log of records. Kafka splits a topic into **partitions** so it can be written to and read from in parallel across brokers. Every record appended to a partition gets a monotonically increasing **offset** — its position in that partition's log. Ordering is only guaranteed *within* a partition, never across partitions of the same topic.
 
@@ -61,7 +61,7 @@ This repo creates its topics programmatically with Spring Kafka's `TopicBuilder`
 
 The **key** a producer assigns to a record determines which partition it lands on (`hash(key) % numPartitions`, by default). `LibraryEventProducer` keys every record by `libraryEventId` (an `Integer`); `OrdersTopology` re-keys the incoming order stream by `locationId` via `.selectKey((key, order) -> order.locationId())` specifically so that all orders for the same store land on the same partition — which is what makes per-store aggregation with a local state store possible (see Part 4).
 
-### Offsets and consumer position
+### <span style="color:hsl(34,68%,44%)">Offsets and consumer position</span>
 
 Kafka does not track "read" vs "unread" the way a queue does. Instead, each **consumer group** tracks a *committed offset* per partition — the position it will resume from after a restart or rebalance. The broker's `__consumer_offsets` internal topic stores this.
 
@@ -74,13 +74,13 @@ Kafka does not track "read" vs "unread" the way a queue does. Instead, each **co
 
 `auto-offset-reset: earliest` is set on both `library-events-consumer` and the streams app, meaning a *brand new* consumer group with no committed offset starts from the beginning of the topic rather than only seeing new records.
 
-### Consumer groups and parallelism
+### <span style="color:hsl(44,68%,32%)">Consumer groups and parallelism</span>
 
 A **consumer group** is a set of consumer instances that cooperatively read a topic — Kafka guarantees each partition is assigned to at most one consumer *within* the group at a time, so work is load-balanced without any two group members processing the same partition simultaneously. Add more consumers than partitions and the extras sit idle; that's why partition count is the real upper bound on consumer parallelism.
 
 `LibraryEventsConsumerConfig.kafkaListenerContainerFactory()` sets `factory.setConcurrency(3)` — three listener threads inside the *same* JVM, matching the topic's 3 partitions one-for-one, so a single consumer instance can drain all partitions in parallel instead of serially.
 
-### Delivery semantics: at-least-once, at-most-once, exactly-once
+### <span style="color:hsl(55,68%,32%)">Delivery semantics: at-least-once, at-most-once, exactly-once</span>
 
 | Semantic           | Guarantee                               | Cost                                                                                            |
 |--------------------|-----------------------------------------|-------------------------------------------------------------------------------------------------|
@@ -98,16 +98,16 @@ This codebase is explicitly **at-least-once**:
 
 </ul>
 
-### Retention, compaction, and the internal topics you don't see
+### <span style="color:hsl(66,68%,32%)">Retention, compaction, and the internal topics you don't see</span>
 
 Kafka retains records for a configured time/size window (topic retention), independent of whether they've been consumed — this is what lets Kafka Streams *replay* a topic from the beginning to rebuild a KTable on startup (see Part 4). Internal topics like `__consumer_offsets` and the Kafka Streams changelog topics (e.g. `<application-id>-<store-name>-changelog`) use **log compaction** instead of time-based retention: only the latest value per key is kept forever, because they represent current state, not an event history.
 
 ---
 
 <a id="part-2--component--message-flow-diagrams"></a>
-## 3. 📨 Part 2 — Component & Message-Flow Diagrams
+## <span style="color:hsl(77,68%,32%)">3. 📨 Part 2 — Component & Message-Flow Diagrams</span>
 
-### 2.1 System component diagram
+### <span style="color:hsl(88,68%,32%)">2.1 System component diagram</span>
 
 ```mermaid
 flowchart LR
@@ -138,7 +138,7 @@ flowchart LR
     end
 ```
 
-### 2.2 Sequence diagram — library event publish, consume, and the retry/DLT path
+### <span style="color:hsl(99,68%,32%)">2.2 Sequence diagram — library event publish, consume, and the retry/DLT path</span>
 
 This traces one representative failure scenario end-to-end: a `PUT /v1/libraryevent` update whose `libraryEventId` doesn't exist in the consumer's database, which the consumer code deliberately treats as **non-retryable** and routes straight to the dead-letter topic (`LibraryEventsService.validate()` throws `IllegalArgumentException`, which `LibraryEventsConsumerConfig.errorHandler()` has registered via `addNotRetryableExceptions(IllegalArgumentException.class)`).
 
@@ -181,7 +181,7 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 ---
 
 <a id="tech-stack"></a>
-## 4. 🧰 Tech Stack
+## <span style="color:hsl(110,68%,32%)">4. 🧰 Tech Stack</span>
 
 | Concern       | Technology                                                                      |
 |---------------|---------------------------------------------------------------------------------|
@@ -200,20 +200,20 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 ---
 
 <a id="gang-of-four-design-patterns-applied"></a>
-## 5. 🏗️ Gang of Four Design Patterns Applied
+## <span style="color:hsl(121,68%,32%)">5. 🏗️ Gang of Four Design Patterns Applied</span>
 
-### Creational
+### <span style="color:hsl(132,68%,32%)">Creational</span>
 | Pattern            | Where                                                                                                                                               |
 |--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Factory Method** | `@Bean` methods in `LibraryEventsConsumerConfig`, `AutoCreateConfig`, `OrdersStreamsConfiguration` — Spring's IoC container is the concrete factory |
 | **Builder**        | `Book`, `LibraryEvent` records use Lombok `@Builder`; `ProducerRecord` construction in `LibraryEventProducer.buildProducerRecord()`                 |
 
-### Structural
+### <span style="color:hsl(143,68%,32%)">Structural</span>
 | Pattern       | Where                                                                                                                          |
 |---------------|--------------------------------------------------------------------------------------------------------------------------------|
 | **Decorator** | `StreamsBuilderFactoryBeanConfigurer` wraps the default `StreamsBuilderFactoryBean` to add a custom uncaught exception handler |
 
-### Behavioural
+### <span style="color:hsl(154,68%,36%)">Behavioural</span>
 | Pattern             | Where                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Strategy**        | `ConsumerRecordRecoverer` in `LibraryEventsConsumerConfig.recoverer()` — swappable recovery (re-publish vs log-and-discard). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type. |
@@ -223,9 +223,9 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 ---
 
 <a id="quick-start"></a>
-## 6. 🚀 Quick Start
+## <span style="color:hsl(164,68%,36%)">6. 🚀 Quick Start</span>
 
-### 1. Start the infrastructure
+### <span style="color:hsl(175,68%,36%)">1. Start the infrastructure</span>
 
 ```bash
 docker compose up -d
@@ -240,13 +240,13 @@ docker compose up -d
 | Grafana               | http://localhost:3001 (admin/admin)   |
 | Swagger UI (producer) | http://localhost:8080/swagger-ui.html |
 
-### 2. Build all modules
+### <span style="color:hsl(186,68%,36%)">2. Build all modules</span>
 
 ```bash
 mvn clean install -DskipTests
 ```
 
-### 3. Run the applications
+### <span style="color:hsl(197,68%,36%)">3. Run the applications</span>
 
 ```bash
 # Terminal 1 — Producer
@@ -262,9 +262,9 @@ mvn spring-boot:run -pl kafka-stream/orders-streams-app
 ---
 
 <a id="api-reference--library-events-producer-port-8080"></a>
-## 7. 🌐 API Reference — Library Events Producer (port 8080)
+## <span style="color:hsl(208,68%,44%)">7. 🌐 API Reference — Library Events Producer (port 8080)</span>
 
-### POST /v1/libraryevent — Publish a new library event
+### <span style="color:hsl(219,68%,44%)">POST /v1/libraryevent — Publish a new library event</span>
 
 ```json
 POST http://localhost:8080/v1/libraryevent
@@ -289,7 +289,7 @@ Response `201 Created`:
 }
 ```
 
-### PUT /v1/libraryevent — Update an existing library event
+### <span style="color:hsl(230,68%,44%)">PUT /v1/libraryevent — Update an existing library event</span>
 
 ```json
 PUT http://localhost:8080/v1/libraryevent
@@ -310,7 +310,7 @@ Response `200 OK`.
 ---
 
 <a id="observability"></a>
-## 8. 📈 Observability
+## <span style="color:hsl(241,68%,44%)">8. 📈 Observability</span>
 
 All modules expose Actuator endpoints:
 
@@ -325,7 +325,7 @@ Import `insomnia-collection.json` into Insomnia to test all endpoints including 
 ---
 
 <a id="running-tests"></a>
-## 9. 🧪 Running Tests
+## <span style="color:hsl(252,68%,44%)">9. 🧪 Running Tests</span>
 
 ```bash
 # Unit + integration tests (all modules)
@@ -340,9 +340,9 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 ---
 
 <a id="module-details"></a>
-## 10. 🏗️ Module Details
+## <span style="color:hsl(263,68%,44%)">10. 🏗️ Module Details</span>
 
-### kafka-core/library-events-producer
+### <span style="color:hsl(274,68%,44%)">kafka-core/library-events-producer</span>
 
 <ul>
 
@@ -354,7 +354,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 </ul>
 
-### kafka-core/library-events-consumer
+### <span style="color:hsl(284,68%,44%)">kafka-core/library-events-consumer</span>
 
 <ul>
 
@@ -366,7 +366,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 </ul>
 
-### kafka-stream/orders-streams-app
+### <span style="color:hsl(295,68%,44%)">kafka-stream/orders-streams-app</span>
 
 <ul>
 
@@ -378,7 +378,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 </ul>
 
-### kafka-schema-registry/schemas
+### <span style="color:hsl(306,68%,44%)">kafka-schema-registry/schemas</span>
 
 <ul>
 
@@ -387,7 +387,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 </ul>
 
-### kafka-schema-registry/coffee-orders-service
+### <span style="color:hsl(317,68%,44%)">kafka-schema-registry/coffee-orders-service</span>
 
 <ul>
 
@@ -397,7 +397,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 </ul>
 
-### kafka-schema-registry/coffee-orders-consumer
+### <span style="color:hsl(328,68%,44%)">kafka-schema-registry/coffee-orders-consumer</span>
 
 <ul>
 
