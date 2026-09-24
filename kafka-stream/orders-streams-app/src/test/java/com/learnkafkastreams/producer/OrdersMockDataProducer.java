@@ -1,8 +1,6 @@
 package com.learnkafkastreams.producer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.json.JsonMapper;
 import com.learnkafkastreams.domain.Order;
 import com.learnkafkastreams.domain.OrderLineItem;
 import com.learnkafkastreams.domain.OrderType;
@@ -22,9 +20,8 @@ import static com.learnkafkastreams.producer.ProducerUtil.publishMessageSync;
 @Slf4j
 public class OrdersMockDataProducer {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+    // Jackson 3: java.time support is built in and ISO-8601 strings are the default
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
     public static void main(String[] args) {
         publishOrders(buildOrders());

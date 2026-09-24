@@ -2,7 +2,7 @@ services:
 
   # ── Kafka (KRaft mode — no Zookeeper) ─────────────────────────────────────
   kafka:
-    image: confluentinc/cp-kafka:7.7.1
+    image: confluentinc/cp-kafka:8.3.2
     container_name: kafka
     ports:
       - "9092:9092"
@@ -40,7 +40,7 @@ services:
 
   # ── Confluent Schema Registry ──────────────────────────────────────────────
   schema-registry:
-    image: confluentinc/cp-schema-registry:7.7.1
+    image: confluentinc/cp-schema-registry:8.3.2
     container_name: schema-registry
     depends_on:
       kafka:

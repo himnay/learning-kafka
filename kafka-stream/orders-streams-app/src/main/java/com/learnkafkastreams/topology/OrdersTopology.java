@@ -12,7 +12,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.kafka.support.serializer.JsonSerde;
+import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 import org.springframework.stereotype.Component;
 
 /**
@@ -53,12 +53,12 @@ public class OrdersTopology {
 
         var orderStreams = streamsBuilder
                 .stream(ORDERS,
-                        Consumed.with(Serdes.String(), new JsonSerde<>(Order.class))
+                        Consumed.with(Serdes.String(), new JacksonJsonSerde<>(Order.class))
                                 .withTimestampExtractor(new OrderTimeStampExtractor()))
                 .selectKey((key, order) -> order.locationId());
 
         var storesTable = streamsBuilder
-                .table(STORES, Consumed.with(Serdes.String(), new JsonSerde<>(Store.class)));
+                .table(STORES, Consumed.with(Serdes.String(), new JacksonJsonSerde<>(Store.class)));
 
         storesTable.toStream()
                 .peek((key, store) -> log.debug("Store: key={} value={}", key, store));
@@ -96,7 +96,7 @@ public class OrdersTopology {
             KTable<String, Store> storesTable) {
 
         var grouped = orderStream
-                .groupByKey(Grouped.with(Serdes.String(), new JsonSerde<>(Order.class)));
+                .groupByKey(Grouped.with(Serdes.String(), new JacksonJsonSerde<>(Order.class)));
 
         // ── Count per store ─────────────────────────────────────────────────
         grouped
@@ -115,7 +115,7 @@ public class OrdersTopology {
                         Materialized
                                 .<String, TotalRevenue, KeyValueStore<Bytes, byte[]>>as(revenueStoreName)
                                 .withKeySerde(Serdes.String())
-                                .withValueSerde(new JsonSerde<>(TotalRevenue.class)))
+                                .withValueSerde(new JacksonJsonSerde<>(TotalRevenue.class)))
                 .toStream()
                 .peek((key, revenue) -> log.debug("[{}] locationId={} revenue={}", revenueStoreName, key, revenue));
     }

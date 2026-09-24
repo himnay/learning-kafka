@@ -28,10 +28,7 @@
       "name": "orderLineItems",
       "type": {
         "type": "array",
-        "items": {
-          "type": "OrderLineItem",
-          "name": "orderLineItem"
-        }
+        "items": "OrderLineItem"
       }
     },
     {

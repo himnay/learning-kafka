@@ -41,7 +41,7 @@ import static org.mockito.Mockito.verify;
 
 /**
  * Integration tests using a real Confluent Kafka container (TestContainers).
- * Uses the exact same image as the docker-compose.yml (confluentinc/cp-kafka:7.7.1)
+ * Uses the exact same image as the docker-compose.yml (confluentinc/cp-kafka:8.3.2)
  * to ensure parity with the local dev environment.
  */
 @SpringBootTest
@@ -50,7 +50,7 @@ class LibraryEventsConsumerContainerTest {
 
     @Container
     static final ConfluentKafkaContainer KAFKA = new ConfluentKafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.7.1"))
+            DockerImageName.parse("confluentinc/cp-kafka:8.3.2"))
             // listener runs with concurrency 3; auto-created topics must have 3 partitions
             .withEnv("KAFKA_NUM_PARTITIONS", "3");
 

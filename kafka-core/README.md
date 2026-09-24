@@ -192,4 +192,4 @@ docker exec -it kafka kafka-console-consumer \
 
 - `LibraryEventsControllerIntegrationTest` / `LibraryEventControllerUnitTest` / `LibraryEventProducerUnitTest` (producer module) — REST layer and producer unit coverage.
 - `LibraryEventsConsumerIntegrationTest` (consumer module) — `@EmbeddedKafka`-backed test that publishes NEW/UPDATE events and asserts the consumer spy, service spy, and H2 repository state, including the "update with unknown id is consumed but not persisted" case that exercises the non-retryable `IllegalArgumentException` path.
-- `LibraryEventsConsumerContainerTest` — TestContainers-backed variant.
+- `LibraryEventsConsumerContainerTest` — Testcontainers-backed variant (real `cp-kafka:8.3.2` broker).

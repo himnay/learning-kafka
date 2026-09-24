@@ -42,10 +42,21 @@ public class CoffeeOrdersProducer {
             String nickName
     ) {}
 
+    /**
+     * JSON view of the published order. Avro {@code SpecificRecord}s are not Jackson-friendly —
+     * serializing one walks {@code getSchema()} and fails ("Not an array: {...}").
+     */
+    public record CoffeeOrderResponse(String id, String name, String nickName, String status, Instant orderedTime) {
+        static CoffeeOrderResponse from(CoffeeOrder order) {
+            return new CoffeeOrderResponse(order.getId().toString(), order.getName().toString(),
+                    order.getNickName().toString(), order.getStatus().toString(), order.getOrderedTime());
+        }
+    }
+
     /** Publishes coffee order. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CoffeeOrder publishCoffeeOrder(@RequestBody @Valid CoffeeOrderRequest request) {
+    public CoffeeOrderResponse publishCoffeeOrder(@RequestBody @Valid CoffeeOrderRequest request) {
         var order = buildCoffeeOrder(request);
         kafkaTemplate.send(TOPIC, order.getId().toString(), order)
                 .whenComplete((result, ex) -> {
@@ -56,7 +67,7 @@ public class CoffeeOrdersProducer {
                                 order.getId(), result.getRecordMetadata().partition());
                     }
                 });
-        return order;
+        return CoffeeOrderResponse.from(order);
     }
 
     private CoffeeOrder buildCoffeeOrder(CoffeeOrderRequest request) {

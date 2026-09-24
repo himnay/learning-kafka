@@ -46,7 +46,7 @@ public class OrdersStreamsConfiguration {
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
                 RecoveringDeserializationExceptionHandler.class);
-        props.put(RecoveringDeserializationExceptionHandler.KSTREAM_DESERIALIZATION_RECOVERER,
+        props.put(RecoveringDeserializationExceptionHandler.RECOVERER,
                 logAndSkipRecoverer);
         return new KafkaStreamsConfiguration(props);
     }

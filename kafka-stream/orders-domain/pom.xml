@@ -14,17 +14,6 @@
     <name>orders-domain</name>
     <description>Shared domain records for the orders Kafka Streams application</description>
 
-    <dependencies>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-        </dependency>
-    </dependencies>
-
     <build>
         <plugins>
             <!-- Skip Spring Boot repackaging — this is a shared library, not an app -->

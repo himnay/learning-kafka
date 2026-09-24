@@ -151,7 +151,7 @@ sequenceDiagram
     SR-->>AvroSer: schema id (registered once, cached after)
     AvroSer->>Topic: [schema-id (4 bytes)][Avro binary payload]
     AvroSer-->>Producer: RecordMetadata (async whenComplete)
-    Producer-->>Client: 201 Created (CoffeeOrder)
+    Producer-->>Client: 201 Created (CoffeeOrderResponse JSON)
 
     Topic->>AvroDeser: ConsumerRecord bytes
     AvroDeser->>SR: fetch schema by id (cached after first lookup)
@@ -173,7 +173,7 @@ mvn spring-boot:run -pl kafka-schema-registry/coffee-orders-service     # port 8
 mvn spring-boot:run -pl kafka-schema-registry/coffee-orders-consumer    # port 8084
 ```
 
-> Note: this module also ships its own standalone `kafka-schema-registry/docker-compose.yaml`, which brings up an older **Zookeeper-mode** broker (`cp-server:7.1.0` + `cp-zookeeper`) with Schema Registry on port **8081** instead of 8085. It predates the root KRaft-based compose file and is kept for reference — prefer the root `docker-compose.yml` for a consistent setup across all modules in this repo.
+> The old standalone ZooKeeper-mode compose file (`cp-server:7.1.0` + `cp-zookeeper`) was removed — ZooKeeper is gone in Kafka 4 / Confluent Platform 8. Use the root KRaft `docker-compose.yml` (CP 8.3.2, Schema Registry on **8085**).
 
 ### <span style="color:hsl(1,80%,58%)">Try it</span>
 
@@ -182,6 +182,14 @@ curl -X POST http://localhost:8083/v1/coffee-orders \
   -H "Content-Type: application/json" \
   -d '{"name": "Ada", "nickName": "Countess"}'
 ```
+
+### <span style="color:hsl(1,80%,58%)">Gotchas (Avro 1.12 / Spring Boot 4)</span>
+
+- **Trusted packages:** Avro ≥ 1.12.1 (`ClassSecurityValidator`, the fix for the 2025 Avro deserialization CVE) only instantiates `SpecificRecord` classes from trusted packages. Both apps set `org.apache.avro.SERIALIZABLE_PACKAGES=com.learnavro.domain.generated` in `main()`; without it every send fails with `SecurityException: Forbidden com.learnavro.domain.generated.CoffeeOrder`.
+- **Don't return Avro records from REST:** Jackson walks `getSchema()` and fails (`Not an array: {...}`). The producer returns a `CoffeeOrderResponse` record.
+- **Avro strings are `CharSequence`** (`Utf8`) — call `.toString()` when mapping to Java types.
+- **Named-type references:** `"items": "OrderLineItem"` — wrapping a reference as `{"type": "OrderLineItem", "name": ...}` is invalid and Avro 1.12.2 rejects it at build time.
+- **Boot 4 modularity:** depend on `spring-boot-starter-kafka`, not bare `spring-kafka` — the Kafka auto-configuration (`KafkaTemplate`, listener container factory) lives in `spring-boot-kafka`.
 
 Then watch `coffee-orders-consumer`'s logs for the `Received CoffeeOrder: id=... name='Ada' status=NEW store=1` line.
 

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.kafka.support.serializer.JsonSerde;
+import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -48,12 +48,12 @@ class OrdersTopologyTest {
         ordersInputTopic = topologyTestDriver.createInputTopic(
                 ORDERS,
                 Serdes.String().serializer(),
-                new JsonSerde<>(Order.class).serializer());
+                new JacksonJsonSerde<>(Order.class).serializer());
 
         storesInputTopic = topologyTestDriver.createInputTopic(
                 STORES,
                 Serdes.String().serializer(),
-                new JsonSerde<>(Store.class).serializer());
+                new JacksonJsonSerde<>(Store.class).serializer());
     }
 
     @AfterEach

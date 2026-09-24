@@ -15,7 +15,7 @@
 9. 🧪 [Running Tests](#running-tests)
 10. 🏗️ [Module Details](#module-details)
 
-A multi-module Maven project demonstrating Apache Kafka with Spring Boot 3.5, Java 25, Confluent Schema Registry, and Kafka Streams. Unlike a toy "hello world," each module wires up the pieces you actually need in production: retryable consumers with dead-letter routing, Avro schema evolution against a real Schema Registry, and a stateful Kafka Streams topology with interactive queries.
+A multi-module Maven project demonstrating Apache Kafka with Spring Boot 4.1, Java 25, Confluent Schema Registry, and Kafka Streams. Unlike a toy "hello world," each module wires up the pieces you actually need in production: retryable consumers with dead-letter routing, Avro schema evolution against a real Schema Registry, and a stateful Kafka Streams topology with interactive queries.
 
 This document is a **conceptual deep-dive** — it explains *why* Kafka is shaped the way it is, and then shows exactly where in this codebase each concept is implemented. For step-by-step run instructions specific to one module, see the per-module READMEs linked throughout.
 
@@ -186,14 +186,14 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 | Concern       | Technology                                                                      |
 |---------------|---------------------------------------------------------------------------------|
 | Language      | Java 25 with virtual threads (Project Loom)                                     |
-| Framework     | Spring Boot 3.5.0                                                               |
-| Messaging     | Apache Kafka 3.9 — KRaft mode (no Zookeeper)                                    |
-| Schema        | Confluent Schema Registry + Apache Avro 1.12                                    |
+| Framework     | Spring Boot 4.1.1 / Spring Kafka 4.1.1 (via super-pom 1.1.0, as of 2026)          |
+| Messaging     | Apache Kafka 4.2 clients, Confluent Platform 8.3.2 broker — KRaft only (ZooKeeper removed in Kafka 4) |
+| Schema        | Confluent Schema Registry 8.3.2 + Apache Avro 1.12.2                            |
 | Streams       | Kafka Streams (via Spring Kafka)                                                |
 | Persistence   | Spring Data JPA + H2                                                            |
 | Observability | Spring Actuator + Micrometer + Prometheus + Grafana                             |
 | API Docs      | springdoc-openapi (Swagger UI at `/swagger-ui.html`)                            |
-| Testing       | JUnit 5, Mockito, Awaitility, Spring Kafka Test (EmbeddedKafka), TestContainers |
+| Testing       | JUnit 6, Mockito, Awaitility, Spring Kafka Test (EmbeddedKafka), Testcontainers 2 |
 | Build         | Maven 3.9 (multi-module)                                                        |
 | UI            | Kafdrop (topic browser)                                                         |
 
@@ -335,7 +335,7 @@ mvn test
 mvn test -pl kafka-core/library-events-producer,kafka-core/library-events-consumer
 ```
 
-Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is available as a dependency for adding container-backed tests.
+Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsConsumerContainerTest` runs against a real `cp-kafka:8.3.2` broker via Testcontainers 2 (`ConfluentKafkaContainer`) — Docker required.
 
 ---
 
@@ -391,7 +391,7 @@ Integration tests use `@EmbeddedKafka` (no Docker needed). TestContainers is ava
 
 <ul>
 
-- Kafka producer using Confluent `KafkaAvroSerializer`
+- Kafka producer using Confluent `KafkaAvroSerializer`; returns a JSON `CoffeeOrderResponse` (never the Avro record itself)
 - Schemas registered automatically to `http://localhost:8085`
 - Deep dive: [`kafka-schema-registry/README.md`](kafka-schema-registry/README.md)
 

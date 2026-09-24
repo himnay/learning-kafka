@@ -52,7 +52,7 @@ class LibraryEventsControllerIntegrationTest {
         restClient = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .build();
-        var configs = new HashMap<>(KafkaTestUtils.consumerProps("group1", "true", embeddedKafkaBroker));
+        var configs = new HashMap<>(KafkaTestUtils.consumerProps(embeddedKafkaBroker, "group1", true));
         consumer = new DefaultKafkaConsumerFactory<>(configs, new IntegerDeserializer(), new StringDeserializer())
                 .createConsumer();
         embeddedKafkaBroker.consumeFromAllEmbeddedTopics(consumer);
