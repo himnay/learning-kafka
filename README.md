@@ -49,6 +49,12 @@ Kafka is a distributed, append-only, partitioned commit log. Everything else —
 
 A **topic** is a named, ordered, immutable log of records. Kafka splits a topic into **partitions** so it can be written to and read from in parallel across brokers. Every record appended to a partition gets a monotonically increasing **offset** — its position in that partition's log. Ordering is only guaranteed *within* a partition, never across partitions of the same topic.
 
+<p align="center">
+  <img src="image/kafka-topic-anatomy.png" alt="Anatomy of a topic: three partitions, each an append-only sequence of numbered records, new writes appended at the end" width="420"/>
+</p>
+
+<p align="center"><sub>Each partition is an append-only log; offsets grow left to right. Diagram: <a href="https://kafka.apache.org/documentation/#intro_concepts_and_terms">Apache Kafka documentation</a>, Apache-2.0.</sub></p>
+
 This repo creates its topics programmatically with Spring Kafka's `TopicBuilder`, rather than relying on broker auto-create, so partition counts are explicit and version-controlled:
 
 | Topic                | Partitions     | Declared in                                                                      |
@@ -77,6 +83,12 @@ Kafka does not track "read" vs "unread" the way a queue does. Instead, each **co
 ### <span style="color:hsl(84,80%,58%)">Consumer groups and parallelism</span>
 
 A **consumer group** is a set of consumer instances that cooperatively read a topic — Kafka guarantees each partition is assigned to at most one consumer *within* the group at a time, so work is load-balanced without any two group members processing the same partition simultaneously. Add more consumers than partitions and the extras sit idle; that's why partition count is the real upper bound on consumer parallelism.
+
+<p align="center">
+  <img src="image/kafka-consumer-groups.png" alt="Two servers holding partitions P0-P3; consumer group A with two consumers and group B with four consumers each receive every partition exactly once" width="480"/>
+</p>
+
+<p align="center"><sub>Every group gets all partitions; inside a group each partition goes to exactly one consumer. Diagram: <a href="https://kafka.apache.org/documentation/#intro_concepts_and_terms">Apache Kafka documentation</a>, Apache-2.0.</sub></p>
 
 `LibraryEventsConsumerConfig.kafkaListenerContainerFactory()` sets `factory.setConcurrency(3)` — three listener threads inside the *same* JVM, matching the topic's 3 partitions one-for-one, so a single consumer instance can drain all partitions in parallel instead of serially.
 
@@ -173,7 +185,7 @@ sequenceDiagram
     Recoverer->>DLT: DeadLetterPublishingRecoverer.accept()\n→ topic "library-events.DLT", same partition
     DLT-->>Recoverer: ack
 
-    Note over Listener,Topic: Offset for the original record is committed —\nthe consumer moves on; the DLT holds the poison message for manual inspection/replay
+    Note over Listener,Topic: Offset for the original record is committed —\nthe consumer moves on#59; the DLT holds the poison message for manual inspection/replay
 ```
 
 A second path exists for **recoverable** failures (`RecoverableDataAccessException`, e.g. a transient DB outage): instead of routing to the DLT, `LibraryEventsConsumerConfig.recoverer()` calls `LibraryEventsService.handleRecovery()`, which re-publishes the same key/value back onto `library-events` for another pass through the whole pipeline. See `kafka-core/README.md` for the full retry/backoff timeline.
@@ -186,7 +198,7 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 | Concern       | Technology                                                                      |
 |---------------|---------------------------------------------------------------------------------|
 | Language      | Java 25 with virtual threads (Project Loom)                                     |
-| Framework     | Spring Boot 4.1.1 / Spring Kafka 4.1.1 (via super-pom 1.1.0, as of 2026)          |
+| Framework     | Spring Boot 4.1.1 / Spring Kafka 4.1.1 (via super-pom 1.1.3, as of 2026)          |
 | Messaging     | Apache Kafka 4.2 clients, Confluent Platform 8.3.2 broker — KRaft only (ZooKeeper removed in Kafka 4) |
 | Schema        | Confluent Schema Registry 8.3.2 + Apache Avro 1.12.2                            |
 | Streams       | Kafka Streams (via Spring Kafka)                                                |

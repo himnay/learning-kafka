@@ -30,6 +30,12 @@ kafka-stream/
 
 ## <span style="color:hsl(122,80%,58%)">The topology, end to end (`OrdersTopology.java`)</span>
 
+<p align="center">
+  <img src="image/kafka-streams-topology.jpg" alt="Kafka Streams processor topology: source processors read input topics, stream processors transform, sink processors write output topics" width="360"/>
+</p>
+
+<p align="center"><sub>A processor topology in general — sources, processors, sinks. Diagram: <a href="https://kafka.apache.org/documentation/streams/architecture">Kafka Streams architecture</a>, Apache-2.0.</sub></p>
+
 ```mermaid
 flowchart TD
     OrdersTopic[("orders topic\n(KStream, key=orderId)")] --> Rekey["selectKey\n(key, order) -> order.locationId()"]
