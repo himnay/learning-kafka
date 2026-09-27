@@ -1,6 +1,6 @@
 # <span style="color:hsl(92,80%,58%)">kafka-core — Library Events Producer & Consumer</span>
 
-This module is the "plain Kafka" half of the repo — no Avro, no Streams, just a REST-facing producer, a JSON-over-Kafka event, and a consumer with retry/dead-letter handling built on Spring Kafka's `DefaultErrorHandler`. It is the best place to start if you want to see the fundamentals: producer records, consumer groups, offsets, and what "at-least-once delivery" actually looks like in application code.
+This module is the "plain Kafka" half of the repo — no Avro, no Streams, just a REST-facing producer, a JSON-over-Kafka event, and a consumer with retry/dead-letter handling built on Spring Kafka's [`DefaultErrorHandler`][DefaultErrorHandler]. It is the best place to start if you want to see the fundamentals: producer records, consumer groups, offsets, and what "at-least-once delivery" actually looks like in application code.
 
 For the broader repo architecture and core Kafka vocabulary, see the [root README](../README.md). This document goes deep on what's *specific* to this module.
 
@@ -18,7 +18,7 @@ kafka-core/
 
 ## <span style="color:hsl(7,80%,58%)">The event: `LibraryEvent`</span>
 
-Both sides define their own copy of the shape (a `record` on the producer side annotated with Bean Validation, a JPA `@Entity` on the consumer side) — they are *not* a shared library dependency. This is a deliberate, common real-world pattern: producer and consumer evolve independently and only agree on the **wire format** (JSON), not a shared Java type. The cost is that a field rename on one side silently breaks the other at runtime instead of at compile time — one of the reasons the `kafka-schema-registry` module exists to show the Avro alternative, which enforces compatibility at publish time instead.
+Both sides define their own copy of the shape (a `record` on the producer side annotated with Bean Validation, a JPA [`@Entity`][Entity] on the consumer side) — they are *not* a shared library dependency. This is a deliberate, common real-world pattern: producer and consumer evolve independently and only agree on the **wire format** (JSON), not a shared Java type. The cost is that a field rename on one side silently breaks the other at runtime instead of at compile time — one of the reasons the `kafka-schema-registry` module exists to show the Avro alternative, which enforces compatibility at publish time instead.
 
 Producer-side shape (`library-events-producer/.../domain/LibraryEvent.java`):
 
@@ -36,7 +36,7 @@ public record Book(
 ) {}
 ```
 
-Wire format (what actually goes on the topic — a JSON string value, `Integer` key):
+Wire format (what actually goes on the topic — a JSON string value, [`Integer`][Integer] key):
 
 ```json
 {
@@ -46,19 +46,19 @@ Wire format (what actually goes on the topic — a JSON string value, `Integer` 
 }
 ```
 
-The **key** is `libraryEventId` (an `Integer`, serialized with `IntegerSerializer`/`IntegerDeserializer`). Keying by event id means updates and news for the *same* library event id always land on the same partition, which preserves per-entity ordering — important because an `UPDATE` for a given book must never be processed before the `NEW` that created it, and per-partition ordering is Kafka's only ordering guarantee.
+The **key** is `libraryEventId` (an `Integer`, serialized with [`IntegerSerializer`][IntegerSerializer]/[`IntegerDeserializer`][IntegerDeserializer]). Keying by event id means updates and news for the *same* library event id always land on the same partition, which preserves per-entity ordering — important because an `UPDATE` for a given book must never be processed before the `NEW` that created it, and per-partition ordering is Kafka's only ordering guarantee.
 
 ---
 
 ## <span style="color:hsl(145,80%,58%)">Producer side: `LibraryEventProducer`</span>
 
-Three send methods, each demonstrating a different Spring Kafka `KafkaTemplate` usage pattern:
+Three send methods, each demonstrating a different Spring Kafka [`KafkaTemplate`][KafkaTemplate] usage pattern:
 
-| Method                          | Used by                                       | Behavior                                                                                                                                                            |
-|---------------------------------|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `sendLibraryEventWithHeaders()` | `POST` / `PUT /v1/libraryevent`               | Async send via an explicit `ProducerRecord` carrying a custom header `event-source: scanner`; returns a `CompletableFuture` the controller does not block on        |
-| `sendLibraryEvent()`            | available, not wired to a controller endpoint | Async send using `kafkaTemplate.sendDefault()` (the configured default topic) — no custom headers                                                                   |
-| `sendLibraryEventSynchronous()` | available, not wired to a controller endpoint | Blocks up to 1 second via `.get(1, TimeUnit.SECONDS)` — shown as the pattern to reach for only when the caller genuinely needs a confirmed offset before responding |
+| Method                          | Used by                                       | Behavior                                                                                                                                                                                            |
+|---------------------------------|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `sendLibraryEventWithHeaders()` | `POST` / `PUT /v1/libraryevent`               | Async send via an explicit [`ProducerRecord`][ProducerRecord] carrying a custom header `event-source: scanner`; returns a [`CompletableFuture`][CompletableFuture] the controller does not block on |
+| `sendLibraryEvent()`            | available, not wired to a controller endpoint | Async send using `kafkaTemplate.sendDefault()` (the configured default topic) — no custom headers                                                                                                   |
+| `sendLibraryEventSynchronous()` | available, not wired to a controller endpoint | Blocks up to 1 second via `.get(1, TimeUnit.SECONDS)` — shown as the pattern to reach for only when the caller genuinely needs a confirmed offset before responding                                 |
 
 `LibraryEventsController` calls `sendLibraryEventWithHeaders()` for both `POST` (sets `LibraryEventType.NEW`) and `PUT` (sets `LibraryEventType.UPDATE`, and 400s if `libraryEventId` is missing) and returns `201`/`200` to the HTTP caller **without waiting for the Kafka send to complete** — the send's success/failure is only observed by the `whenComplete()` callback (`handleSuccess` / `handleFailure`), which just logs. This is a fire-and-forget-from-the-HTTP-caller's-perspective design: the REST API's availability is decoupled from Kafka's availability, at the cost of the HTTP response not reflecting whether the message actually made it onto the topic.
 
@@ -74,7 +74,7 @@ spring.kafka.producer.properties:
 
 - **`acks=all`** is the strongest per-record durability the producer can ask for: the leader only acks once every in-sync replica has the record, so a leader crash immediately after acking doesn't lose data.
 - **`enable.idempotence=true`** turns on the idempotent producer, which assigns each producer instance a PID and sequence number per partition. If a `retries`-triggered resend duplicates a request the broker already wrote, the broker recognizes the duplicate sequence number and drops it instead of appending it twice. This eliminates *producer-retry* duplicates — it says nothing about the consumer redelivering a record it already fully processed, which is a separate, application-level concern (see the consumer section below).
-- **Auto-topic-creation** (`AutoCreateConfig`, `@Profile("local")`) declares `library-events` with `3` partitions / `1` replica via `NewTopic` — only active in the `local` profile so production topic configuration (partition count, replication factor) is managed deliberately outside the app.
+- **Auto-topic-creation** (`AutoCreateConfig`, [`@Profile("local")`][Profile]) declares `library-events` with `3` partitions / `1` replica via [`NewTopic`][NewTopic] — only active in the `local` profile so production topic configuration (partition count, replication factor) is managed deliberately outside the app.
 
 ---
 
@@ -89,7 +89,7 @@ public void onMessage(ConsumerRecord<Integer, String> consumerRecord) {
 
 `processLibraryEvent()` is the Template Method: it deserializes the JSON value back into a (consumer-side) `LibraryEvent` entity, then dispatches by `libraryEventType`:
 
-- **`NEW`** → `save()` — persists `LibraryEvent` + cascaded `Book` via `LibraryEventsRepository` (Spring Data JPA / H2, `@Transactional`).
+- **`NEW`** → `save()` — persists `LibraryEvent` + cascaded `Book` via `LibraryEventsRepository` (Spring Data JPA / H2, [`@Transactional`][Transactional]).
 - **`UPDATE`** → `validate()` then `save()`. `validate()` is where the deliberately-thrown, deliberately-non-retryable failure lives:
 
 ```java
@@ -102,11 +102,11 @@ private void validate(LibraryEvent libraryEvent) {
 }
 ```
 
-An `UPDATE` for an id that was never `save()`d as `NEW` (or has a null id) is not a *transient* problem — retrying it will fail identically every time. That's exactly why it's modeled as `IllegalArgumentException` and excluded from retry (below) rather than left to burn through backoff attempts for no benefit.
+An `UPDATE` for an id that was never `save()`d as `NEW` (or has a null id) is not a *transient* problem — retrying it will fail identically every time. That's exactly why it's modeled as [`IllegalArgumentException`][IllegalArgumentException] and excluded from retry (below) rather than left to burn through backoff attempts for no benefit.
 
 ### <span style="color:hsl(197,80%,58%)">Error handling: `LibraryEventsConsumerConfig`</span>
 
-This is the heart of the module's "how do you *actually* handle consumer failures" story. Spring Kafka's `DefaultErrorHandler` wraps a `BackOff` policy and a `ConsumerRecordRecoverer`:
+This is the heart of the module's "how do you *actually* handle consumer failures" story. Spring Kafka's [`DefaultErrorHandler`][DefaultErrorHandler] wraps a [`BackOff`][BackOff] policy and a [`ConsumerRecordRecoverer`][ConsumerRecordRecoverer]:
 
 ```java
 var backOff  = new FixedBackOff(1_000L, 2);              // 1s delay, 2 retries = 3 attempts total
@@ -116,12 +116,12 @@ handler.addNotRetryableExceptions(IllegalArgumentException.class);
 
 Recovery strategy (the Strategy-pattern branch inside `recoverer()`), keyed off the **root cause** of the listener exception:
 
-| Root cause                                                                                               | Behavior                                                                                                                                                                      |
-|----------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `RecoverableDataAccessException`                                                                         | Treated as transient — `LibraryEventsService.handleRecovery()` re-publishes the *same* key/value back onto `library-events` for a fresh pass through the whole pipeline later |
-| anything else (including `IllegalArgumentException`, and any exception that survives all retry attempts) | Routed via `DeadLetterPublishingRecoverer` to **`library-events.DLT`**, same partition number as the original record                                                          |
+| Root cause                                                                                                                           | Behavior                                                                                                                                                                      |
+|--------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`RecoverableDataAccessException`][RecoverableDataAccessException]                                                                   | Treated as transient — `LibraryEventsService.handleRecovery()` re-publishes the *same* key/value back onto `library-events` for a fresh pass through the whole pipeline later |
+| anything else (including [`IllegalArgumentException`][IllegalArgumentException], and any exception that survives all retry attempts) | Routed via [`DeadLetterPublishingRecoverer`][DeadLetterPublishingRecoverer] to **`library-events.DLT`**, same partition number as the original record                         |
 
-Retry attempts are logged via `handler.setRetryListeners(...)`, and the DLT topic is declared explicitly (`NewTopic(DLT_TOPIC).partitions(3).replicas(1)`), so it exists from application startup rather than being created lazily on first dead-letter — matching the source partition count so the "same partition" mapping in the recoverer above is meaningful.
+Retry attempts are logged via `handler.setRetryListeners(...)`, and the DLT topic is declared explicitly ([`NewTopic(DLT_TOPIC).partitions(3).replicas(1)`][NewTopic]), so it exists from application startup rather than being created lazily on first dead-letter — matching the source partition count so the "same partition" mapping in the recoverer above is meaningful.
 
 **Retry timeline for a genuinely transient failure** (3 concurrent listener threads, `concurrency=3`, matching the topic's 3 partitions):
 
@@ -138,7 +138,7 @@ Only after the recoverer completes does the container commit the offset for that
 
 ### <span style="color:hsl(335,80%,58%)">Manual offset commits — `LibraryEventsConsumerManualOffset`</span>
 
-A second, intentionally minimal listener (`@Profile("manual-offset")`, so it never runs alongside the default auto-commit listener) demonstrates the other end of the offset-commit spectrum:
+A second, intentionally minimal listener ([`@Profile("manual-offset")`][Profile], so it never runs alongside the default auto-commit listener) demonstrates the other end of the offset-commit spectrum:
 
 ```java
 @KafkaListener(topics = {"library-events"})
@@ -147,7 +147,7 @@ public void onMessage(ConsumerRecord<Integer, String> consumerRecord, Acknowledg
 }
 ```
 
-With `AcknowledgingMessageListener` + `MANUAL_IMMEDIATE` ack mode, the framework will *not* commit an offset unless the listener calls `acknowledgment.acknowledge()` itself. This is the building block for "commit only after I'm certain the side effect (DB write, downstream call) succeeded" — the default `LibraryEventsConsumer` gets an equivalent effect implicitly (auto-commit only fires after the listener method returns without throwing), but the manual variant makes the commit point an explicit, single line of application code, which matters once processing spans more than one listener invocation (e.g. batching, or committing after a separate async step completes).
+With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IMMEDIATE` ack mode, the framework will *not* commit an offset unless the listener calls `acknowledgment.acknowledge()` itself. This is the building block for "commit only after I'm certain the side effect (DB write, downstream call) succeeded" — the default `LibraryEventsConsumer` gets an equivalent effect implicitly (auto-commit only fires after the listener method returns without throwing), but the manual variant makes the commit point an explicit, single line of application code, which matters once processing spans more than one listener invocation (e.g. batching, or committing after a separate async step completes).
 
 ---
 
@@ -191,5 +191,26 @@ docker exec -it kafka kafka-console-consumer \
 ### <span style="color:hsl(165,80%,58%)">Tests</span>
 
 - `LibraryEventsControllerIntegrationTest` / `LibraryEventControllerUnitTest` / `LibraryEventProducerUnitTest` (producer module) — REST layer and producer unit coverage.
-- `LibraryEventsConsumerIntegrationTest` (consumer module) — `@EmbeddedKafka`-backed test that publishes NEW/UPDATE events and asserts the consumer spy, service spy, and H2 repository state, including the "update with unknown id is consumed but not persisted" case that exercises the non-retryable `IllegalArgumentException` path.
+- `LibraryEventsConsumerIntegrationTest` (consumer module) — [`@EmbeddedKafka`][EmbeddedKafka]-backed test that publishes NEW/UPDATE events and asserts the consumer spy, service spy, and H2 repository state, including the "update with unknown id is consumed but not persisted" case that exercises the non-retryable [`IllegalArgumentException`][IllegalArgumentException] path.
 - `LibraryEventsConsumerContainerTest` — Testcontainers-backed variant (real `cp-kafka:8.3.2` broker).
+
+<!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
+
+[AcknowledgingMessageListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/AcknowledgingMessageListener.java
+[BackOff]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-core/src/main/java/org/springframework/util/backoff/BackOff.java
+[CompletableFuture]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java
+[ConsumerRecordRecoverer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/ConsumerRecordRecoverer.java
+[DeadLetterPublishingRecoverer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/DeadLetterPublishingRecoverer.java
+[DefaultErrorHandler]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/DefaultErrorHandler.java
+[EmbeddedKafka]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka-test/src/main/java/org/springframework/kafka/test/context/EmbeddedKafka.java
+[Entity]: https://github.com/jakartaee/persistence/blob/3.2-3.2.0-RELEASE/api/src/main/java/jakarta/persistence/Entity.java
+[IllegalArgumentException]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/IllegalArgumentException.java
+[Integer]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/Integer.java
+[IntegerDeserializer]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/common/serialization/IntegerDeserializer.java
+[IntegerSerializer]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/common/serialization/IntegerSerializer.java
+[KafkaTemplate]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/core/KafkaTemplate.java
+[NewTopic]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/clients/admin/NewTopic.java
+[ProducerRecord]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/clients/producer/ProducerRecord.java
+[Profile]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-context/src/main/java/org/springframework/context/annotation/Profile.java
+[RecoverableDataAccessException]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-tx/src/main/java/org/springframework/dao/RecoverableDataAccessException.java
+[Transactional]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-tx/src/main/java/org/springframework/transaction/annotation/Transactional.java

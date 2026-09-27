@@ -55,7 +55,7 @@ A **topic** is a named, ordered, immutable log of records. Kafka splits a topic 
 
 <p align="center"><sub>Each partition is an append-only log; offsets grow left to right. Diagram: <a href="https://kafka.apache.org/documentation/#intro_concepts_and_terms">Apache Kafka documentation</a>, Apache-2.0.</sub></p>
 
-This repo creates its topics programmatically with Spring Kafka's `TopicBuilder`, rather than relying on broker auto-create, so partition counts are explicit and version-controlled:
+This repo creates its topics programmatically with Spring Kafka's [`TopicBuilder`][TopicBuilder], rather than relying on broker auto-create, so partition counts are explicit and version-controlled:
 
 | Topic                | Partitions     | Declared in                                                                      |
 |----------------------|----------------|----------------------------------------------------------------------------------|
@@ -65,7 +65,7 @@ This repo creates its topics programmatically with Spring Kafka's `TopicBuilder`
 | `stores`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
 | `coffee-orders`      | broker default | created implicitly on first produce by `coffee-orders-service`                   |
 
-The **key** a producer assigns to a record determines which partition it lands on (`hash(key) % numPartitions`, by default). `LibraryEventProducer` keys every record by `libraryEventId` (an `Integer`); `OrdersTopology` re-keys the incoming order stream by `locationId` via `.selectKey((key, order) -> order.locationId())` specifically so that all orders for the same store land on the same partition — which is what makes per-store aggregation with a local state store possible (see Part 4).
+The **key** a producer assigns to a record determines which partition it lands on (`hash(key) % numPartitions`, by default). `LibraryEventProducer` keys every record by `libraryEventId` (an [`Integer`][Integer]); `OrdersTopology` re-keys the incoming order stream by `locationId` via `.selectKey((key, order) -> order.locationId())` specifically so that all orders for the same store land on the same partition — which is what makes per-store aggregation with a local state store possible (see Part 4).
 
 ### <span style="color:hsl(307,80%,58%)">Offsets and consumer position</span>
 
@@ -74,7 +74,7 @@ Kafka does not track "read" vs "unread" the way a queue does. Instead, each **co
 <ul>
 
 - `library-events-consumer` runs with the **default auto-commit** behavior (Spring Kafka commits the offset for you after the listener method returns without throwing).
-- `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile) demonstrates the alternative: `AcknowledgingMessageListener` with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
+- `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile) demonstrates the alternative: [`AcknowledgingMessageListener`][AcknowledgingMessageListener] with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
 
 </ul>
 
@@ -105,7 +105,7 @@ This codebase is explicitly **at-least-once**:
 <ul>
 
 - `library-events-producer` sets `acks: all` (wait for all in-sync replicas) with `enable.idempotence: true` and `retries: 10` — this makes *producer-side* sends idempotent (no duplicate writes from producer retries) and durable, but does not make the end-to-end pipeline exactly-once.
-- `library-events-consumer`'s default listener commits the offset only after `LibraryEventsService.processLibraryEvent()` returns successfully (implicit ack-after-processing). If the JVM crashes after the DB write but before the offset commit, the same record is redelivered on restart — the consumer must tolerate reprocessing (in this demo it isn't made strictly idempotent; a second `save()` of the same JPA entity is an upsert-by-id, which is *close* to idempotent by accident of using `@Id` on `libraryEventId`).
+- `library-events-consumer`'s default listener commits the offset only after `LibraryEventsService.processLibraryEvent()` returns successfully (implicit ack-after-processing). If the JVM crashes after the DB write but before the offset commit, the same record is redelivered on restart — the consumer must tolerate reprocessing (in this demo it isn't made strictly idempotent; a second `save()` of the same JPA entity is an upsert-by-id, which is *close* to idempotent by accident of using [`@Id`][Id] on `libraryEventId`).
 - Kafka Streams uses `processing.guarantee=at_least_once` by default (not overridden anywhere in `OrdersStreamsConfiguration`), so the count/revenue aggregations can, in rare failure-and-reprocessing scenarios, double-count a record. Enabling exactly-once semantics for the streams app would mean setting `processing.guarantee=exactly_once_v2`, which turns on transactional writes to the state-store changelog topics and the output topics together.
 
 </ul>
@@ -152,7 +152,7 @@ flowchart LR
 
 ### <span style="color:hsl(52,80%,50%)">2.2 Sequence diagram — library event publish, consume, and the retry/DLT path</span>
 
-This traces one representative failure scenario end-to-end: a `PUT /v1/libraryevent` update whose `libraryEventId` doesn't exist in the consumer's database, which the consumer code deliberately treats as **non-retryable** and routes straight to the dead-letter topic (`LibraryEventsService.validate()` throws `IllegalArgumentException`, which `LibraryEventsConsumerConfig.errorHandler()` has registered via `addNotRetryableExceptions(IllegalArgumentException.class)`).
+This traces one representative failure scenario end-to-end: a `PUT /v1/libraryevent` update whose `libraryEventId` doesn't exist in the consumer's database, which the consumer code deliberately treats as **non-retryable** and routes straight to the dead-letter topic (`LibraryEventsService.validate()` throws [`IllegalArgumentException`][IllegalArgumentException], which `LibraryEventsConsumerConfig.errorHandler()` has registered via `addNotRetryableExceptions(IllegalArgumentException.class)`).
 
 ```mermaid
 sequenceDiagram
@@ -188,7 +188,7 @@ sequenceDiagram
     Note over Listener,Topic: Offset for the original record is committed —\nthe consumer moves on#59; the DLT holds the poison message for manual inspection/replay
 ```
 
-A second path exists for **recoverable** failures (`RecoverableDataAccessException`, e.g. a transient DB outage): instead of routing to the DLT, `LibraryEventsConsumerConfig.recoverer()` calls `LibraryEventsService.handleRecovery()`, which re-publishes the same key/value back onto `library-events` for another pass through the whole pipeline. See `kafka-core/README.md` for the full retry/backoff timeline.
+A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `LibraryEventsConsumerConfig.recoverer()` calls `LibraryEventsService.handleRecovery()`, which re-publishes the same key/value back onto `library-events` for another pass through the whole pipeline. See `kafka-core/README.md` for the full retry/backoff timeline.
 
 ---
 
@@ -215,22 +215,22 @@ A second path exists for **recoverable** failures (`RecoverableDataAccessExcepti
 ## <span style="color:hsl(327,80%,58%)">5. 🏗️ Gang of Four Design Patterns Applied</span>
 
 ### <span style="color:hsl(104,80%,58%)">Creational</span>
-| Pattern            | Where                                                                                                                                               |
-|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Factory Method** | `@Bean` methods in `LibraryEventsConsumerConfig`, `AutoCreateConfig`, `OrdersStreamsConfiguration` — Spring's IoC container is the concrete factory |
-| **Builder**        | `Book`, `LibraryEvent` records use Lombok `@Builder`; `ProducerRecord` construction in `LibraryEventProducer.buildProducerRecord()`                 |
+| Pattern            | Where                                                                                                                                                            |
+|--------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Factory Method** | [`@Bean`][Bean] methods in `LibraryEventsConsumerConfig`, `AutoCreateConfig`, `OrdersStreamsConfiguration` — Spring's IoC container is the concrete factory      |
+| **Builder**        | `Book`, `LibraryEvent` records use Lombok [`@Builder`][Builder]; [`ProducerRecord`][ProducerRecord] construction in `LibraryEventProducer.buildProducerRecord()` |
 
 ### <span style="color:hsl(242,80%,58%)">Structural</span>
-| Pattern       | Where                                                                                                                          |
-|---------------|--------------------------------------------------------------------------------------------------------------------------------|
-| **Decorator** | `StreamsBuilderFactoryBeanConfigurer` wraps the default `StreamsBuilderFactoryBean` to add a custom uncaught exception handler |
+| Pattern       | Where                                                                                                                                                                                              |
+|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Decorator** | [`StreamsBuilderFactoryBeanConfigurer`][StreamsBuilderFactoryBeanConfigurer] wraps the default [`StreamsBuilderFactoryBean`][StreamsBuilderFactoryBean] to add a custom uncaught exception handler |
 
 ### <span style="color:hsl(19,80%,58%)">Behavioural</span>
-| Pattern             | Where                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Strategy**        | `ConsumerRecordRecoverer` in `LibraryEventsConsumerConfig.recoverer()` — swappable recovery (re-publish vs log-and-discard). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type. |
-| **Template Method** | `LibraryEventsService.processLibraryEvent()` defines the algorithm skeleton; `save()` and `validate()` are the concrete steps dispatched by event type via a switch expression. `OrdersTopology.aggregateOrdersCountAndRevenue()` is the reusable skeleton for both GENERAL and RESTAURANT branches.                                                                                                                                                     |
-| **Observer**        | `LibraryEventsConsumer` annotated with `@KafkaListener` — Spring Kafka registers it as an observer that reacts to each Kafka record                                                                                                                                                                                                                                                                                                                      |
+| Pattern             | Where                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Strategy**        | [`ConsumerRecordRecoverer`][ConsumerRecordRecoverer] in `LibraryEventsConsumerConfig.recoverer()` — swappable recovery (re-publish vs log-and-discard). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type. |
+| **Template Method** | `LibraryEventsService.processLibraryEvent()` defines the algorithm skeleton; `save()` and `validate()` are the concrete steps dispatched by event type via a switch expression. `OrdersTopology.aggregateOrdersCountAndRevenue()` is the reusable skeleton for both GENERAL and RESTAURANT branches.                                                                                                                                                                                |
+| **Observer**        | `LibraryEventsConsumer` annotated with [`@KafkaListener`][KafkaListener] — Spring Kafka registers it as an observer that reacts to each Kafka record                                                                                                                                                                                                                                                                                                                                |
 
 ---
 
@@ -347,7 +347,7 @@ mvn test
 mvn test -pl kafka-core/library-events-producer,kafka-core/library-events-consumer
 ```
 
-Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsConsumerContainerTest` runs against a real `cp-kafka:8.3.2` broker via Testcontainers 2 (`ConfluentKafkaContainer`) — Docker required.
+Most integration tests use [`@EmbeddedKafka`][EmbeddedKafka] (no Docker needed). `LibraryEventsConsumerContainerTest` runs against a real `cp-kafka:8.3.2` broker via Testcontainers 2 ([`ConfluentKafkaContainer`][ConfluentKafkaContainer]) — Docker required.
 
 ---
 
@@ -359,9 +359,9 @@ Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsCo
 <ul>
 
 - REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`
-- Kafka producer with async `CompletableFuture`-based send
+- Kafka producer with async [`CompletableFuture`][CompletableFuture]-based send
 - Custom headers per record (`event-source: scanner`)
-- `@ControllerAdvice` for validation error mapping
+- [`@ControllerAdvice`][ControllerAdvice] for validation error mapping
 - Deep dive: [`kafka-core/README.md`](kafka-core/README.md)
 
 </ul>
@@ -370,10 +370,10 @@ Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsCo
 
 <ul>
 
-- `@KafkaListener` consuming the `library-events` topic
+- [`@KafkaListener`][KafkaListener] consuming the `library-events` topic
 - Persists `LibraryEvent` + `Book` entities to H2 via Spring Data JPA
-- `DefaultErrorHandler` with `FixedBackOff` (1 s delay, 2 retries — 3 attempts total)
-- `IllegalArgumentException` is not retried and goes straight to the dead-letter topic `library-events.DLT`; `RecoverableDataAccessException` triggers recovery by re-publishing the event
+- [`DefaultErrorHandler`][DefaultErrorHandler] with [`FixedBackOff`][FixedBackOff] (1 s delay, 2 retries — 3 attempts total)
+- [`IllegalArgumentException`][IllegalArgumentException] is not retried and goes straight to the dead-letter topic `library-events.DLT`; [`RecoverableDataAccessException`][RecoverableDataAccessException] triggers recovery by re-publishing the event
 - Deep dive: [`kafka-core/README.md`](kafka-core/README.md)
 
 </ul>
@@ -382,9 +382,9 @@ Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsCo
 
 <ul>
 
-- `@EnableKafkaStreams` Spring Boot integration
+- [`@EnableKafkaStreams`][EnableKafkaStreams] Spring Boot integration
 - `OrdersTopology` builds the Kafka Streams topology: re-key by `locationId`, branch orders by type (`GENERAL` / `RESTAURANT`), aggregate per-store count and running revenue into materialized state stores
-- Custom deserialization (`RecoveringDeserializationExceptionHandler` + log-and-skip) and serialization (`StreamsSerializationExceptionHandler`) exception handlers, plus a custom `StreamsUncaughtExceptionHandler` that decides between replacing the stream thread and shutting the app down
+- Custom deserialization ([`RecoveringDeserializationExceptionHandler`][RecoveringDeserializationExceptionHandler] + log-and-skip) and serialization (`StreamsSerializationExceptionHandler`) exception handlers, plus a custom [`StreamsUncaughtExceptionHandler`][StreamsUncaughtExceptionHandler] that decides between replacing the stream thread and shutting the app down
 - `OrdersController` / `OrderStoreService` expose the state stores as a queryable REST API (interactive queries)
 - Deep dive: [`kafka-stream/README.md`](kafka-stream/README.md)
 
@@ -403,7 +403,7 @@ Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsCo
 
 <ul>
 
-- Kafka producer using Confluent `KafkaAvroSerializer`; returns a JSON `CoffeeOrderResponse` (never the Avro record itself)
+- Kafka producer using Confluent [`KafkaAvroSerializer`][KafkaAvroSerializer]; returns a JSON `CoffeeOrderResponse` (never the Avro record itself)
 - Schemas registered automatically to `http://localhost:8085`
 - Deep dive: [`kafka-schema-registry/README.md`](kafka-schema-registry/README.md)
 
@@ -413,7 +413,34 @@ Most integration tests use `@EmbeddedKafka` (no Docker needed). `LibraryEventsCo
 
 <ul>
 
-- Kafka consumer using Confluent `KafkaAvroDeserializer` with `specific.avro.reader=true`
+- Kafka consumer using Confluent [`KafkaAvroDeserializer`][KafkaAvroDeserializer] with `specific.avro.reader=true`
 - Deep dive: [`kafka-schema-registry/README.md`](kafka-schema-registry/README.md)
 
 </ul>
+
+<!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
+
+[AcknowledgingMessageListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/AcknowledgingMessageListener.java
+[Bean]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-context/src/main/java/org/springframework/context/annotation/Bean.java
+[Builder]: https://github.com/projectlombok/lombok/blob/v1.18.46/src/core/lombok/Builder.java
+[CompletableFuture]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java
+[ConfluentKafkaContainer]: https://github.com/testcontainers/testcontainers-java/blob/2.0.5/modules/kafka/src/main/java/org/testcontainers/kafka/ConfluentKafkaContainer.java
+[ConsumerRecordRecoverer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/ConsumerRecordRecoverer.java
+[ControllerAdvice]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-web/src/main/java/org/springframework/web/bind/annotation/ControllerAdvice.java
+[DefaultErrorHandler]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/DefaultErrorHandler.java
+[EmbeddedKafka]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka-test/src/main/java/org/springframework/kafka/test/context/EmbeddedKafka.java
+[EnableKafkaStreams]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/annotation/EnableKafkaStreams.java
+[FixedBackOff]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-core/src/main/java/org/springframework/util/backoff/FixedBackOff.java
+[Id]: https://github.com/jakartaee/persistence/blob/3.2-3.2.0-RELEASE/api/src/main/java/jakarta/persistence/Id.java
+[IllegalArgumentException]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/IllegalArgumentException.java
+[Integer]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/Integer.java
+[KafkaAvroDeserializer]: https://github.com/confluentinc/schema-registry/blob/v8.3.2/avro-serializer/src/main/java/io/confluent/kafka/serializers/KafkaAvroDeserializer.java
+[KafkaAvroSerializer]: https://github.com/confluentinc/schema-registry/blob/v8.3.2/avro-serializer/src/main/java/io/confluent/kafka/serializers/KafkaAvroSerializer.java
+[KafkaListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/annotation/KafkaListener.java
+[ProducerRecord]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/clients/producer/ProducerRecord.java
+[RecoverableDataAccessException]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-tx/src/main/java/org/springframework/dao/RecoverableDataAccessException.java
+[RecoveringDeserializationExceptionHandler]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/streams/RecoveringDeserializationExceptionHandler.java
+[StreamsBuilderFactoryBean]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/config/StreamsBuilderFactoryBean.java
+[StreamsBuilderFactoryBeanConfigurer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/config/StreamsBuilderFactoryBeanConfigurer.java
+[StreamsUncaughtExceptionHandler]: https://github.com/apache/kafka/blob/4.2.1/streams/src/main/java/org/apache/kafka/streams/errors/StreamsUncaughtExceptionHandler.java
+[TopicBuilder]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/config/TopicBuilder.java

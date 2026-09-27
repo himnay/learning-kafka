@@ -19,14 +19,14 @@ kafka-schema-registry/
 
 ## <span style="color:hsl(118,80%,58%)">Why Avro + Schema Registry instead of JSON</span>
 
-With plain JSON (as in `kafka-core`), the "schema" is only ever the Java class the producer happened to serialize with `ObjectMapper`, and consumers just hope their own copy of that shape still matches. Nothing prevents a producer from renaming a field and shipping — the failure shows up as a deserialization exception (or worse, silently-wrong data) on the consumer side, in production.
+With plain JSON (as in `kafka-core`), the "schema" is only ever the Java class the producer happened to serialize with [`ObjectMapper`][ObjectMapper], and consumers just hope their own copy of that shape still matches. Nothing prevents a producer from renaming a field and shipping — the failure shows up as a deserialization exception (or worse, silently-wrong data) on the consumer side, in production.
 
 Avro + Schema Registry changes the contract:
 
 1. The **schema** (`.avsc`) is a first-class artifact, checked into version control (`schemas/src/main/avro/*.avsc` in this repo) and compiled into generated Java classes by the `avro-maven-plugin`.
-2. When a producer serializes a record with `KafkaAvroSerializer`, the client library registers (or looks up) that exact schema against the Schema Registry HTTP API and prefixes the Avro-encoded bytes with a 4-byte **schema id** instead of embedding the schema itself in every message — this is what keeps individual messages small even though Avro schemas can be large.
+2. When a producer serializes a record with [`KafkaAvroSerializer`][KafkaAvroSerializer], the client library registers (or looks up) that exact schema against the Schema Registry HTTP API and prefixes the Avro-encoded bytes with a 4-byte **schema id** instead of embedding the schema itself in every message — this is what keeps individual messages small even though Avro schemas can be large.
 3. Before the registry accepts a *new* version of a schema for a given subject (by default, `<topic>-value`), it checks the new schema against the previous version(s) under the subject's configured **compatibility mode**. An incompatible change is rejected at registration time — i.e., at build/deploy time for the producer — rather than discovered later as a runtime consumer failure.
-4. On the consumer side, `KafkaAvroDeserializer` reads the schema id from the message, fetches (and caches) the corresponding writer schema from the registry, and reconciles it against the consumer's own compile-time reader schema using Avro's schema-resolution rules.
+4. On the consumer side, [`KafkaAvroDeserializer`][KafkaAvroDeserializer] reads the schema id from the message, fetches (and caches) the corresponding writer schema from the registry, and reconciles it against the consumer's own compile-time reader schema using Avro's schema-resolution rules.
 
 ---
 
@@ -68,7 +68,7 @@ erDiagram
 
 Two things worth calling out in the actual `.avsc` files:
 
-- **Logical types**: `CoffeeOrder.id` is declared `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}` — Avro logical types let the generated Java classes expose idiomatic `UUID` and `Instant` getters/setters (see `CoffeeOrdersProducer.buildCoffeeOrder()`, which calls `.setId(UUID.randomUUID())` and `.setOrderedTime(Instant.now())` directly) while the wire format stays a plain string/long. `OrderLineItem.cost` similarly uses a `bytes` logical `decimal` type (precision 3, scale 2) so `BigDecimal` round-trips exactly instead of losing precision through a floating-point type — the `avro-maven-plugin` config explicitly turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
+- **Logical types**: `CoffeeOrder.id` is declared `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}` — Avro logical types let the generated Java classes expose idiomatic `UUID` and [`Instant`][Instant] getters/setters (see `CoffeeOrdersProducer.buildCoffeeOrder()`, which calls `.setId(UUID.randomUUID())` and `.setOrderedTime(Instant.now())` directly) while the wire format stays a plain string/long. `OrderLineItem.cost` similarly uses a `bytes` logical `decimal` type (precision 3, scale 2) so [`BigDecimal`][BigDecimal] round-trips exactly instead of losing precision through a floating-point type — the `avro-maven-plugin` config explicitly turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
 - **A separate schema not yet wired to any producer/consumer**: `CoffeeUpdateEvent.avsc` defines `{id, status}` with a `status` enum of `PROCESSING | READY_FOR_PICK_UP` — a smaller, order-status-only event shape. It compiles alongside the others but no Java code in `coffee-orders-service` / `coffee-orders-consumer` currently produces or consumes it; it's present in the schemas module as a second, independently-versioned subject (`CoffeeUpdateEvent-value` if published), illustrating that a Schema Registry instance manages compatibility **per subject**, not globally — evolving `CoffeeOrder` has no bearing on `CoffeeUpdateEvent`'s compatibility rules.
 
 ### <span style="color:hsl(33,80%,58%)">Schema evolution and compatibility modes — how the defaults in these schemas are *already* evolution-safe</span>
@@ -105,7 +105,7 @@ private final KafkaTemplate<String, CoffeeOrder> kafkaTemplate;   // value type 
 kafkaTemplate.send(TOPIC, order.getId().toString(), order)  // key = order UUID as a String
 ```
 
-`application.yml` wires the Avro serializer in for this specific `KafkaTemplate`:
+`application.yml` wires the Avro serializer in for this specific [`KafkaTemplate`][KafkaTemplate]:
 
 ```yaml
 spring.kafka.producer:
@@ -115,7 +115,7 @@ spring.kafka.producer:
     schema.registry.url: http://localhost:8085
 ```
 
-`POST /v1/coffee-orders` (`CoffeeOrdersProducer.CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, real `UUID.randomUUID()` id, `Instant.now()` ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the resulting partition on success via the same async `whenComplete()` pattern used in `kafka-core`.
+`POST /v1/coffee-orders` (`CoffeeOrdersProducer.CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the resulting partition on success via the same async `whenComplete()` pattern used in `kafka-core`.
 
 ## <span style="color:hsl(308,80%,58%)">Consumer: `CoffeeOrdersConsumer`</span>
 
@@ -128,7 +128,7 @@ spring.kafka.consumer:
     specific.avro.reader: true
 ```
 
-`specific.avro.reader: true` is what makes `KafkaAvroDeserializer` hand the listener a fully-typed generated `CoffeeOrder` object (`record.value().getId()`, `.getStatus()`, `.getStore().getId()`, etc., as used in `CoffeeOrdersConsumer.onMessage()`) instead of the generic, reflection-only `GenericRecord` you get when this flag is left `false`.
+`specific.avro.reader: true` is what makes [`KafkaAvroDeserializer`][KafkaAvroDeserializer] hand the listener a fully-typed generated `CoffeeOrder` object (`record.value().getId()`, `.getStatus()`, `.getStore().getId()`, etc., as used in `CoffeeOrdersConsumer.onMessage()`) instead of the generic, reflection-only [`GenericRecord`][GenericRecord] you get when this flag is left `false`.
 
 ---
 
@@ -185,11 +185,11 @@ curl -X POST http://localhost:8083/v1/coffee-orders \
 
 ### <span style="color:hsl(1,80%,58%)">Gotchas (Avro 1.12 / Spring Boot 4)</span>
 
-- **Trusted packages:** Avro ≥ 1.12.1 (`ClassSecurityValidator`, the fix for the 2025 Avro deserialization CVE) only instantiates `SpecificRecord` classes from trusted packages. Both apps set `org.apache.avro.SERIALIZABLE_PACKAGES=com.learnavro.domain.generated` in `main()`; without it every send fails with `SecurityException: Forbidden com.learnavro.domain.generated.CoffeeOrder`.
+- **Trusted packages:** Avro ≥ 1.12.1 ([`ClassSecurityValidator`][ClassSecurityValidator], the fix for the 2025 Avro deserialization CVE) only instantiates [`SpecificRecord`][SpecificRecord] classes from trusted packages. Both apps set `org.apache.avro.SERIALIZABLE_PACKAGES=com.learnavro.domain.generated` in `main()`; without it every send fails with `SecurityException: Forbidden com.learnavro.domain.generated.CoffeeOrder`.
 - **Don't return Avro records from REST:** Jackson walks `getSchema()` and fails (`Not an array: {...}`). The producer returns a `CoffeeOrderResponse` record.
-- **Avro strings are `CharSequence`** (`Utf8`) — call `.toString()` when mapping to Java types.
+- **Avro strings are [`CharSequence`][CharSequence]** ([`Utf8`][Utf8]) — call `.toString()` when mapping to Java types.
 - **Named-type references:** `"items": "OrderLineItem"` — wrapping a reference as `{"type": "OrderLineItem", "name": ...}` is invalid and Avro 1.12.2 rejects it at build time.
-- **Boot 4 modularity:** depend on `spring-boot-starter-kafka`, not bare `spring-kafka` — the Kafka auto-configuration (`KafkaTemplate`, listener container factory) lives in `spring-boot-kafka`.
+- **Boot 4 modularity:** depend on `spring-boot-starter-kafka`, not bare `spring-kafka` — the Kafka auto-configuration ([`KafkaTemplate`][KafkaTemplate], listener container factory) lives in `spring-boot-kafka`.
 
 Then watch `coffee-orders-consumer`'s logs for the `Received CoffeeOrder: id=... name='Ada' status=NEW store=1` line.
 
@@ -199,3 +199,17 @@ Then watch `coffee-orders-consumer`'s logs for the `Received CoffeeOrder: id=...
 curl http://localhost:8085/subjects
 curl http://localhost:8085/subjects/coffee-orders-value/versions/latest
 ```
+
+<!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
+
+[BigDecimal]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/math/BigDecimal.java
+[CharSequence]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/CharSequence.java
+[ClassSecurityValidator]: https://github.com/apache/avro/blob/release-1.12.2/lang/java/avro/src/main/java/org/apache/avro/util/ClassSecurityValidator.java
+[GenericRecord]: https://github.com/apache/avro/blob/release-1.12.2/lang/java/avro/src/main/java/org/apache/avro/generic/GenericRecord.java
+[Instant]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/time/Instant.java
+[KafkaAvroDeserializer]: https://github.com/confluentinc/schema-registry/blob/v8.3.2/avro-serializer/src/main/java/io/confluent/kafka/serializers/KafkaAvroDeserializer.java
+[KafkaAvroSerializer]: https://github.com/confluentinc/schema-registry/blob/v8.3.2/avro-serializer/src/main/java/io/confluent/kafka/serializers/KafkaAvroSerializer.java
+[KafkaTemplate]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/core/KafkaTemplate.java
+[ObjectMapper]: https://github.com/FasterXML/jackson-databind/blob/jackson-databind-3.1.5/src/main/java/tools/jackson/databind/ObjectMapper.java
+[SpecificRecord]: https://github.com/apache/avro/blob/release-1.12.2/lang/java/avro/src/main/java/org/apache/avro/specific/SpecificRecord.java
+[Utf8]: https://github.com/apache/avro/blob/release-1.12.2/lang/java/avro/src/main/java/org/apache/avro/util/Utf8.java
