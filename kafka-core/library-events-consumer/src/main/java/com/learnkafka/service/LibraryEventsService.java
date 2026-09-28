@@ -35,7 +35,8 @@ public class LibraryEventsService {
         try {
             libraryEvent = objectMapper.readValue(consumerRecord.value(), LibraryEvent.class);
         } catch (JacksonException e) {
-            throw new RuntimeException("Failed to deserialize library event: " + e.getMessage(), e);
+            // Malformed JSON never parses on a retry: IllegalArgumentException is not retried (straight to the DLT)
+            throw new IllegalArgumentException("Failed to deserialize library event: " + e.getOriginalMessage(), e);
         }
         log.info("Processing libraryEvent : {}", libraryEvent);
 

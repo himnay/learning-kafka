@@ -15,6 +15,7 @@ import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.CommonErrorHandler;
+import org.springframework.kafka.listener.ContainerProperties.AckMode;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
@@ -36,12 +37,32 @@ public class LibraryEventsConsumerConfig {
 
     static final String DLT_TOPIC = "library-events.DLT";
 
+    /** Container factory for listeners that commit offsets themselves. */
+    public static final String MANUAL_ACK_CONTAINER_FACTORY = "manualAckContainerFactory";
+
     private final LibraryEventsService libraryEventsService;
     private final KafkaTemplate<Integer, String> kafkaTemplate;
 
     /** 3 concurrent listener threads — matches the 3 topic partitions. */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<Object, Object> kafkaListenerContainerFactory(
+            ConsumerFactory<Object, Object> kafkaConsumerFactory) {
+        return newContainerFactory(kafkaConsumerFactory);
+    }
+
+    /**
+     * Same container setup, but the listener commits each offset itself via
+     * {@code Acknowledgment.acknowledge()}, synchronously (MANUAL_IMMEDIATE).
+     */
+    @Bean(MANUAL_ACK_CONTAINER_FACTORY)
+    public ConcurrentKafkaListenerContainerFactory<Object, Object> manualAckContainerFactory(
+            ConsumerFactory<Object, Object> kafkaConsumerFactory) {
+        var factory = newContainerFactory(kafkaConsumerFactory);
+        factory.getContainerProperties().setAckMode(AckMode.MANUAL_IMMEDIATE);
+        return factory;
+    }
+
+    private ConcurrentKafkaListenerContainerFactory<Object, Object> newContainerFactory(
             ConsumerFactory<Object, Object> kafkaConsumerFactory) {
         var factory = new ConcurrentKafkaListenerContainerFactory<Object, Object>();
         factory.setConsumerFactory(kafkaConsumerFactory);

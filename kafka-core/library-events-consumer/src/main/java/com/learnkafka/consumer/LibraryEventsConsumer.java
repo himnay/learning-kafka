@@ -4,15 +4,18 @@ import com.learnkafka.service.LibraryEventsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 /**
  * Observer Pattern: Spring Kafka registers this listener as an observer on the "library-events" topic.
  * Each partition message triggers onMessage(), which delegates processing to LibraryEventsService.
+ * Replaced by {@link LibraryEventsConsumerManualOffset} under the "manual-offset" profile.
  */
 @Slf4j
 @Component
+@Profile("!manual-offset")
 @RequiredArgsConstructor
 public class LibraryEventsConsumer {
 

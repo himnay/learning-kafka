@@ -6,7 +6,11 @@ import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
 import com.learnkafka.jpa.LibraryEventsRepository;
 import com.learnkafka.service.LibraryEventsService;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,14 +19,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.ContainerTestUtils;
+import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -30,6 +38,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.*;
 
@@ -148,5 +158,47 @@ class LibraryEventsConsumerIntegrationTest {
                     verify(libraryEventsConsumerSpy, atLeast(1)).onMessage(isA(ConsumerRecord.class));
                     verify(libraryEventsServiceSpy, atLeast(1)).processLibraryEvent(isA(ConsumerRecord.class));
                 });
+    }
+
+    @Test
+    @DisplayName("Update for an unknown library event id is not retried and lands on the dead-letter topic")
+    void invalidUpdate_isDeadLettered_withoutRetry() {
+        String json = "{\"libraryEventId\":4242,\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":7,\"bookName\":\"Ghost\",\"bookAuthor\":\"Nobody\"}}";
+        kafkaTemplate.sendDefault(4242, json);
+
+        ConsumerRecord<Integer, String> dead = awaitDeadLetter(json);
+        assertThat(new String(dead.headers().lastHeader("kafka_dlt-exception-cause-fqcn").value(), StandardCharsets.UTF_8))
+                .isEqualTo(IllegalArgumentException.class.getName());
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(argThat(r -> json.equals(r.value())));
+    }
+
+    @Test
+    @DisplayName("A record that is not valid JSON is not retried and lands on the dead-letter topic")
+    void malformedJson_isDeadLettered_withoutRetry() {
+        String garbage = "not-json-" + System.nanoTime();
+        kafkaTemplate.sendDefault(garbage);
+
+        awaitDeadLetter(garbage);
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(argThat(r -> garbage.equals(r.value())));
+    }
+
+    /** Reads library-events.DLT from the beginning until the record with this value shows up. */
+    private ConsumerRecord<Integer, String> awaitDeadLetter(String value) {
+        var props = KafkaTestUtils.consumerProps(embeddedKafkaBroker, "dlt-reader-" + System.nanoTime(), false);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        try (Consumer<Integer, String> dltConsumer = new DefaultKafkaConsumerFactory<>(
+                props, new IntegerDeserializer(), new StringDeserializer()).createConsumer()) {
+            dltConsumer.subscribe(List.of("library-events.DLT"));
+            var found = new java.util.concurrent.atomic.AtomicReference<ConsumerRecord<Integer, String>>();
+            Awaitility.await().atMost(15, TimeUnit.SECONDS).until(() -> {
+                for (ConsumerRecord<Integer, String> r : dltConsumer.poll(Duration.ofMillis(500))) {
+                    if (value.equals(r.value())) {
+                        found.set(r);
+                    }
+                }
+                return found.get() != null;
+            });
+            return found.get();
+        }
     }
 }
