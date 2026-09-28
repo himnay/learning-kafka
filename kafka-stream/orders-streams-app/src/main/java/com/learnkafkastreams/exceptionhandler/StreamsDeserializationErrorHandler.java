@@ -15,14 +15,12 @@ public class StreamsDeserializationErrorHandler implements DeserializationExcept
     private final AtomicInteger errorCounter = new AtomicInteger(0);
 
     @Override
-    public DeserializationHandlerResponse handle(ErrorHandlerContext context,
+    public Response handleError(ErrorHandlerContext context,
             ConsumerRecord<byte[], byte[]> record, Exception exception) {
         log.error("Deserialization exception: {} for record: {}", exception.getMessage(), record, exception);
         int count = errorCounter.incrementAndGet();
         log.warn("Deserialization error count: {}", count);
-        return count <= MAX_ERRORS
-                ? DeserializationHandlerResponse.CONTINUE
-                : DeserializationHandlerResponse.FAIL;
+        return count <= MAX_ERRORS ? Response.resume() : Response.fail();
     }
 
     @Override

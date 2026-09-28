@@ -44,12 +44,5 @@ spring:
     streams:
       bootstrap-servers: localhost:9092
       application-id: orders-kafka-streams
-    properties:
-      default:
-        key:
-          serde: org.apache.kafka.common.serialization.Serdes$StringSerde
-        value:
-          serde: org.apache.kafka.common.serialization.Serdes$StringSerde
-        serialization:
-          exception:
-            handler: com.learnkafkastreams.exceptionhandler.StreamsSerializationExceptionHandler
+# Serdes and exception handlers are set in OrdersStreamsConfiguration: its KafkaStreamsConfiguration
+# bean replaces Boot's, so spring.kafka.properties / spring.kafka.streams.properties never reach Streams.

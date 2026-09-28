@@ -1,6 +1,7 @@
 package com.learnkafkastreams.config;
 
 import com.learnkafkastreams.exceptionhandler.StreamsProcessorCustomErrorHandler;
+import com.learnkafkastreams.exceptionhandler.StreamsSerializationExceptionHandler;
 import com.learnkafkastreams.topology.OrdersTopology;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -44,10 +45,14 @@ public class OrdersStreamsConfiguration {
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
         props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-        props.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
+        props.put(StreamsConfig.DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
                 RecoveringDeserializationExceptionHandler.class);
         props.put(RecoveringDeserializationExceptionHandler.RECOVERER,
                 logAndSkipRecoverer);
+        // This bean replaces Boot's streams configuration, so spring.kafka.* properties do not
+        // reach Kafka Streams: every handler has to be registered here.
+        props.put(StreamsConfig.PRODUCTION_EXCEPTION_HANDLER_CLASS_CONFIG,
+                StreamsSerializationExceptionHandler.class);
         return new KafkaStreamsConfiguration(props);
     }
 
