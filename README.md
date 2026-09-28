@@ -73,8 +73,8 @@ Kafka does not track "read" vs "unread" the way a queue does. Instead, each **co
 
 <ul>
 
-- `library-events-consumer` runs with the **default auto-commit** behavior (Spring Kafka commits the offset for you after the listener method returns without throwing).
-- `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile) demonstrates the alternative: [`AcknowledgingMessageListener`][AcknowledgingMessageListener] with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
+- `library-events-consumer` uses Spring Kafka's **container-managed commits**: Kafka's own `enable.auto.commit` is off, and with the default `BATCH` ack mode the container commits the offsets once the listener has handled every record from a poll (a record that throws is first retried or recovered by the error handler).
+- `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile, which switches the default listener off) demonstrates the alternative: [`AcknowledgingMessageListener`][AcknowledgingMessageListener] with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
 
 </ul>
 
@@ -422,8 +422,8 @@ Most integration tests use [`@EmbeddedKafka`][EmbeddedKafka] (no Docker needed).
 
 [AcknowledgingMessageListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/AcknowledgingMessageListener.java
 [Bean]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-context/src/main/java/org/springframework/context/annotation/Bean.java
-[Builder]: https://github.com/projectlombok/lombok/blob/v1.18.46/src/core/lombok/Builder.java
-[CompletableFuture]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java
+[Builder]: https://github.com/projectlombok/lombok/blob/v1.18.48/src/core/lombok/Builder.java
+[CompletableFuture]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java
 [ConfluentKafkaContainer]: https://github.com/testcontainers/testcontainers-java/blob/2.0.5/modules/kafka/src/main/java/org/testcontainers/kafka/ConfluentKafkaContainer.java
 [ConsumerRecordRecoverer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/ConsumerRecordRecoverer.java
 [ControllerAdvice]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-web/src/main/java/org/springframework/web/bind/annotation/ControllerAdvice.java
@@ -432,8 +432,8 @@ Most integration tests use [`@EmbeddedKafka`][EmbeddedKafka] (no Docker needed).
 [EnableKafkaStreams]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/annotation/EnableKafkaStreams.java
 [FixedBackOff]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-core/src/main/java/org/springframework/util/backoff/FixedBackOff.java
 [Id]: https://github.com/jakartaee/persistence/blob/3.2-3.2.0-RELEASE/api/src/main/java/jakarta/persistence/Id.java
-[IllegalArgumentException]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/IllegalArgumentException.java
-[Integer]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/Integer.java
+[IllegalArgumentException]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/lang/IllegalArgumentException.java
+[Integer]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/lang/Integer.java
 [KafkaAvroDeserializer]: https://github.com/confluentinc/schema-registry/blob/v8.3.2/avro-serializer/src/main/java/io/confluent/kafka/serializers/KafkaAvroDeserializer.java
 [KafkaAvroSerializer]: https://github.com/confluentinc/schema-registry/blob/v8.3.2/avro-serializer/src/main/java/io/confluent/kafka/serializers/KafkaAvroSerializer.java
 [KafkaListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/annotation/KafkaListener.java

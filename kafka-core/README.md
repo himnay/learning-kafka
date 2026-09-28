@@ -102,7 +102,7 @@ private void validate(LibraryEvent libraryEvent) {
 }
 ```
 
-An `UPDATE` for an id that was never `save()`d as `NEW` (or has a null id) is not a *transient* problem — retrying it will fail identically every time. That's exactly why it's modeled as [`IllegalArgumentException`][IllegalArgumentException] and excluded from retry (below) rather than left to burn through backoff attempts for no benefit.
+An `UPDATE` for an id that was never `save()`d as `NEW` (or has a null id) is not a *transient* problem — retrying it will fail identically every time. That's exactly why it's modeled as [`IllegalArgumentException`][IllegalArgumentException] and excluded from retry (below) rather than left to burn through backoff attempts for no benefit. A value that is not valid JSON gets the same treatment: `processLibraryEvent()` rethrows the Jackson parse error as an `IllegalArgumentException`.
 
 ### <span style="color:hsl(197,80%,58%)">Error handling: `LibraryEventsConsumerConfig`</span>
 
@@ -138,16 +138,19 @@ Only after the recoverer completes does the container commit the offset for that
 
 ### <span style="color:hsl(335,80%,58%)">Manual offset commits — `LibraryEventsConsumerManualOffset`</span>
 
-A second, intentionally minimal listener ([`@Profile("manual-offset")`][Profile], so it never runs alongside the default auto-commit listener) demonstrates the other end of the offset-commit spectrum:
+A second, intentionally minimal listener ([`@Profile("manual-offset")`][Profile]; the default `LibraryEventsConsumer` is `@Profile("!manual-offset")`, so the two never run together) demonstrates the other end of the offset-commit spectrum:
 
 ```java
-@KafkaListener(topics = {"library-events"})
+@KafkaListener(topics = {"library-events"}, groupId = "${spring.kafka.consumer.group-id}",
+        containerFactory = LibraryEventsConsumerConfig.MANUAL_ACK_CONTAINER_FACTORY)
 public void onMessage(ConsumerRecord<Integer, String> consumerRecord, Acknowledgment acknowledgment) {
     acknowledgment.acknowledge();
 }
 ```
 
-With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IMMEDIATE` ack mode, the framework will *not* commit an offset unless the listener calls `acknowledgment.acknowledge()` itself. This is the building block for "commit only after I'm certain the side effect (DB write, downstream call) succeeded" — the default `LibraryEventsConsumer` gets an equivalent effect implicitly (auto-commit only fires after the listener method returns without throwing), but the manual variant makes the commit point an explicit, single line of application code, which matters once processing spans more than one listener invocation (e.g. batching, or committing after a separate async step completes).
+The `manualAckContainerFactory` bean in `LibraryEventsConsumerConfig` is the default factory's setup plus `AckMode.MANUAL_IMMEDIATE`. Without it the container would run in the default `BATCH` mode, where Spring Kafka has no `Acknowledgment` to pass and every record fails.
+
+With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IMMEDIATE` ack mode, the framework will *not* commit an offset unless the listener calls `acknowledgment.acknowledge()` itself. This is the building block for "commit only after I'm certain the side effect (DB write, downstream call) succeeded" — the default `LibraryEventsConsumer` gets an equivalent effect implicitly (in `BATCH` mode the container commits only after the listener has handled the records), but the manual variant makes the commit point an explicit, single line of application code, which matters once processing spans more than one listener invocation (e.g. batching, or committing after a separate async step completes).
 
 ---
 
@@ -170,8 +173,9 @@ mvn spring-boot:run -pl kafka-core/library-events-producer
 # Terminal 2
 mvn spring-boot:run -pl kafka-core/library-events-consumer
 
-# Terminal 3 (optional) — manual-offset demo consumer
-mvn spring-boot:run -pl kafka-core/library-events-consumer -Dspring-boot.run.profiles=manual-offset
+# Instead of terminal 2 (optional): the manual-offset demo consumer. Keep "local" in the list:
+# it holds the broker address, deserializers and group id.
+mvn spring-boot:run -pl kafka-core/library-events-consumer -Dspring-boot.run.profiles=local,manual-offset
 ```
 
 Requires the root `docker-compose.yml` stack running (`docker compose up -d` from the repo root) for Kafka + Kafdrop.
@@ -191,21 +195,22 @@ docker exec -it kafka kafka-console-consumer \
 ### <span style="color:hsl(165,80%,58%)">Tests</span>
 
 - `LibraryEventsControllerIntegrationTest` / `LibraryEventControllerUnitTest` / `LibraryEventProducerUnitTest` (producer module) — REST layer and producer unit coverage.
-- `LibraryEventsConsumerIntegrationTest` (consumer module) — [`@EmbeddedKafka`][EmbeddedKafka]-backed test that publishes NEW/UPDATE events and asserts the consumer spy, service spy, and H2 repository state, including the "update with unknown id is consumed but not persisted" case that exercises the non-retryable [`IllegalArgumentException`][IllegalArgumentException] path.
+- `LibraryEventsConsumerIntegrationTest` (consumer module) — [`@EmbeddedKafka`][EmbeddedKafka]-backed test that publishes NEW/UPDATE events and asserts the consumer spy, service spy, and H2 repository state, including the "update with unknown id is consumed but not persisted" case that exercises the non-retryable [`IllegalArgumentException`][IllegalArgumentException] path. Two more tests read `library-events.DLT` back: an unknown-id update and a record that is not JSON each land there after exactly one attempt, with the `kafka_dlt-exception-cause-fqcn` header naming the cause.
+- `LibraryEventsConsumerManualOffsetTest` — runs with `local,manual-offset`, checks that only the manual listener is active, and that its `acknowledge()` commits the offset (read back with the Kafka `Admin` client).
 - `LibraryEventsConsumerContainerTest` — Testcontainers-backed variant (real `cp-kafka:8.3.2` broker).
 
 <!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
 
 [AcknowledgingMessageListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/AcknowledgingMessageListener.java
 [BackOff]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-core/src/main/java/org/springframework/util/backoff/BackOff.java
-[CompletableFuture]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java
+[CompletableFuture]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/util/concurrent/CompletableFuture.java
 [ConsumerRecordRecoverer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/ConsumerRecordRecoverer.java
 [DeadLetterPublishingRecoverer]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/DeadLetterPublishingRecoverer.java
 [DefaultErrorHandler]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/DefaultErrorHandler.java
 [EmbeddedKafka]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka-test/src/main/java/org/springframework/kafka/test/context/EmbeddedKafka.java
 [Entity]: https://github.com/jakartaee/persistence/blob/3.2-3.2.0-RELEASE/api/src/main/java/jakarta/persistence/Entity.java
-[IllegalArgumentException]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/IllegalArgumentException.java
-[Integer]: https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.base/share/classes/java/lang/Integer.java
+[IllegalArgumentException]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/lang/IllegalArgumentException.java
+[Integer]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/lang/Integer.java
 [IntegerDeserializer]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/common/serialization/IntegerDeserializer.java
 [IntegerSerializer]: https://github.com/apache/kafka/blob/4.2.1/clients/src/main/java/org/apache/kafka/common/serialization/IntegerSerializer.java
 [KafkaTemplate]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/core/KafkaTemplate.java
