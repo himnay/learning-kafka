@@ -178,7 +178,7 @@ mvn spring-boot:run -pl kafka-core/library-events-consumer
 mvn spring-boot:run -pl kafka-core/library-events-consumer -Dspring-boot.run.profiles=local,manual-offset
 ```
 
-Requires the root `docker-compose.yml` stack running (`docker compose up -d` from the repo root) for Kafka + Kafdrop.
+Requires Kafka + Kafdrop running — from this directory: `docker compose up -d` (brings up just the two containers this module needs, on the same ports as the root stack: Kafka on `9092`, Kafdrop on `9000`). The root `docker-compose.yml` works too if you want the full repo's observability stack as well, but the two should not run at the same time — both bind `9092`/`9000`.
 
 ### <span style="color:hsl(27,80%,58%)">Inspecting the dead-letter topic</span>
 
