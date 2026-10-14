@@ -6,6 +6,7 @@ import com.learnkafkastreams.domain.OrderLineItem;
 import com.learnkafkastreams.domain.OrderType;
 import com.learnkafkastreams.domain.Store;
 import com.learnkafkastreams.domain.TotalRevenue;
+import com.learnkafkastreams.domain.TotalRevenueWithAddress;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -19,11 +20,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import static com.learnkafkastreams.topology.OrdersTopology.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -127,6 +132,72 @@ class OrdersTopologyTest {
 
         var revenueStore = topologyTestDriver.<String, TotalRevenue>getKeyValueStore(GENERAL_ORDERS_REVENUE);
         assertEquals(new BigDecimal("32.00"), revenueStore.get("store_1234").runningRevenue());
+    }
+
+    @Test
+    @DisplayName("Windowed count: orders are counted per store per 30 s tumbling window, by order time")
+    void windowedCount_perThirtySecondWindow() {
+        var items = List.of(new OrderLineItem("Bananas", 1, new BigDecimal("5.00")));
+        var start = LocalDateTime.parse("2026-02-16T11:27:00");
+        // two orders in [11:27:00, 11:27:30), one in [11:27:30, 11:28:00)
+        ordersInputTopic.pipeInput("1", new Order(1, "store_1234", new BigDecimal("5.00"), OrderType.GENERAL, items, start.plusSeconds(1)));
+        ordersInputTopic.pipeInput("2", new Order(2, "store_1234", new BigDecimal("5.00"), OrderType.GENERAL, items, start.plusSeconds(29)));
+        ordersInputTopic.pipeInput("3", new Order(3, "store_1234", new BigDecimal("5.00"), OrderType.GENERAL, items, start.plusSeconds(31)));
+
+        var windowStore = topologyTestDriver.<String, Long>getWindowStore(GENERAL_ORDERS_COUNT_WINDOWS);
+        try (var windows = windowStore.fetch("store_1234", utc(start), utc(start.plusMinutes(1)))) {
+            var counts = new java.util.LinkedHashMap<LocalDateTime, Long>();
+            windows.forEachRemaining(kv -> counts.put(LocalDateTime.ofInstant(Instant.ofEpochMilli(kv.key), ZoneOffset.UTC), kv.value));
+            assertThat(counts).containsExactly(
+                    Map.entry(start, 2L),
+                    Map.entry(start.plusSeconds(30), 1L));
+        }
+    }
+
+    @Test
+    @DisplayName("Window retention: windows stay queryable for an hour of stream time, not just size + grace")
+    void windows_retainedForAnHour() {
+        var items = List.of(new OrderLineItem("Bananas", 1, new BigDecimal("5.00")));
+        var start = LocalDateTime.parse("2026-02-16T11:27:00");
+        ordersInputTopic.pipeInput("1", new Order(1, "store_1234", new BigDecimal("5.00"), OrderType.GENERAL, items, start.plusSeconds(1)));
+        // advance stream time by 30 minutes: far beyond size + grace (40 s), within the 1 h retention
+        ordersInputTopic.pipeInput("2", new Order(2, "store_1234", new BigDecimal("5.00"), OrderType.GENERAL, items, start.plusMinutes(30)));
+
+        var windowStore = topologyTestDriver.<String, Long>getWindowStore(GENERAL_ORDERS_COUNT_WINDOWS);
+        assertEquals(1L, windowStore.fetch("store_1234", utc(start).toEpochMilli()));
+    }
+
+    @Test
+    @DisplayName("Windowed revenue: running revenue is aggregated per store per window")
+    void windowedRevenue_perWindow() {
+        var items = List.of(new OrderLineItem("Pizza", 1, new BigDecimal("12.00")));
+        var start = LocalDateTime.parse("2026-02-16T11:27:00");
+        ordersInputTopic.pipeInput("1", new Order(1, "store_1234", new BigDecimal("12.00"), OrderType.RESTAURANT, items, start.plusSeconds(5)));
+        ordersInputTopic.pipeInput("2", new Order(2, "store_1234", new BigDecimal("3.00"), OrderType.RESTAURANT, items, start.plusSeconds(10)));
+
+        var windowStore = topologyTestDriver.<String, TotalRevenue>getWindowStore(RESTAURANT_ORDERS_REVENUE_WINDOWS);
+        var revenue = windowStore.fetch("store_1234", utc(start).toEpochMilli());
+        assertNotNull(revenue);
+        assertEquals(new BigDecimal("15.00"), revenue.runningRevenue());
+        assertEquals(2, revenue.runningOrderCount());
+    }
+
+    @Test
+    @DisplayName("Join: revenue is joined with the store's details; a store without a stores record has no joined row")
+    void revenueJoinedWithStore() {
+        storesInputTopic.pipeInput("store_1234", buildStores().get(0).value);   // store_4567 deliberately missing
+        ordersInputTopic.pipeKeyValueList(buildOrders());
+
+        var joined = topologyTestDriver.<String, TotalRevenueWithAddress>getKeyValueStore(GENERAL_ORDERS_REVENUE_WITH_ADDRESS);
+        var row = joined.get("store_1234");
+        assertNotNull(row);
+        assertEquals(new BigDecimal("27.00"), row.totalRevenue().runningRevenue());
+        assertEquals("City1", row.store().address().city());
+        assertThat(joined.get("store_4567")).isNull();   // inner join: no store record → no row
+    }
+
+    private static Instant utc(LocalDateTime time) {
+        return time.toInstant(ZoneOffset.UTC);
     }
 
     static List<KeyValue<String, Order>> buildOrders() {

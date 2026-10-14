@@ -16,9 +16,10 @@ public class AutoCreateConfig {
     /** Defines the library events bean. */
     @Bean
     public NewTopic libraryEvents() {
+        // No .replicas(): the broker's default.replication.factor applies (3 on the compose
+        // cluster, 1 on a single-node test broker) instead of a hard-coded, unsafe RF 1.
         return TopicBuilder.name(LibraryEventProducer.TOPIC)
                 .partitions(3)
-                .replicas(1)
                 .build();
     }
 }

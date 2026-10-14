@@ -38,3 +38,14 @@ LEFT JOIN events e
 WHERE p.consumer_group = 'library-events-listener-group'
   AND p.topic = 'library-events'
   AND e.kafka_offset IS NULL;
+
+-- 4. The same EVENT sent more than once (same base-event eventId at several offsets) — producer
+--    re-sends. The consumers apply it once (processed_event has a unique (group, event_id) index);
+--    this shows how often it happened. Events written before metadata existed have no event_id.
+SELECT e.event_id, e.event_type, count(*) AS copies,
+       string_agg(e.kafka_partition || ':' || e.kafka_offset, ', ' ORDER BY e.kafka_offset) AS positions
+FROM events e
+WHERE e.event_id IS NOT NULL
+GROUP BY e.event_id, e.event_type
+HAVING count(*) > 1;
+

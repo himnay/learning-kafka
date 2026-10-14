@@ -1,6 +1,7 @@
 package com.learnkafka.coffee;
 
 import com.learnavro.domain.generated.CoffeeOrder;
+import com.learnkafka.event.EventMetadataFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,7 @@ class CoffeeOrdersProducerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new CoffeeOrdersProducer(kafkaTemplate);   // package-private test constructor
+        controller = new CoffeeOrdersProducer(kafkaTemplate, new EventMetadataFactory("library-events-producer"));   // package-private test constructor
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -55,13 +56,18 @@ class CoffeeOrdersProducerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNotEmpty())
                 .andExpect(jsonPath("$.name").value("Grace"))
-                .andExpect(jsonPath("$.status").value("NEW"));
+                .andExpect(jsonPath("$.status").value("NEW"))
+                .andExpect(jsonPath("$.metadata.eventType").value("CoffeeOrder.PLACED"))
+                .andExpect(jsonPath("$.metadata.eventId").isNotEmpty());
 
         var key = ArgumentCaptor.forClass(String.class);
         var order = ArgumentCaptor.forClass(CoffeeOrder.class);
         verify(kafkaTemplate).send(eq(CoffeeOrdersProducer.TOPIC), key.capture(), order.capture());
         assertThat(key.getValue()).isEqualTo(order.getValue().getId().toString());
         assertThat(order.getValue().getOrderLineItems()).hasSize(1);
+        // child event of the base event: metadata travels inside the Avro record
+        assertThat(order.getValue().getMetadata().getEventType().toString()).isEqualTo("CoffeeOrder.PLACED");
+        assertThat(order.getValue().getMetadata().getSource().toString()).isEqualTo("library-events-producer");
     }
 
     @Test

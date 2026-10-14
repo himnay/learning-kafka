@@ -1,0 +1,14 @@
+{
+  "name": "EventMetadataAvro",
+  "namespace": "com.learnkafka.avro",
+  "type": "record",
+  "doc": "Common properties of every event — the 'base event'. Avro has no inheritance, so each event schema embeds this record as its 'metadata' field (composition).",
+  "fields": [
+    { "name": "eventId",       "type": { "type": "string", "logicalType": "uuid" }, "doc": "Unique per event; consumers dedupe on it." },
+    { "name": "eventType",     "type": "string", "doc": "<Aggregate>.<Action>, e.g. LibraryEvent.NEW, CoffeeOrder.PLACED" },
+    { "name": "eventVersion",  "type": "int", "default": 1, "doc": "Version of the event's payload contract." },
+    { "name": "occurredAt",    "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "source",        "type": "string", "doc": "Producing application (spring.application.name)." },
+    { "name": "correlationId", "type": ["null", "string"], "default": null, "doc": "Ties events to the request that caused them (X-Correlation-Id)." }
+  ]
+}

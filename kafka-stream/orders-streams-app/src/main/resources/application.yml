@@ -1,14 +1,19 @@
 spring:
   application:
     name: orders-kafka-streams
-  profiles:
-    active: local
   threads:
     virtual:
       enabled: true
   mvc:
     problemdetails:
       enabled: true
+  kafka:
+    streams:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}   # any broker of the kafka-core cluster
+      application-id: orders-kafka-streams
+      # state-dir: /var/lib/orders-streams                           # RocksDB state (default: <tmp>/kafka-streams)
+# Serdes and exception handlers are set in OrdersStreamsConfiguration: its KafkaStreamsConfiguration
+# bean replaces Boot's, so spring.kafka.properties / spring.kafka.streams.properties never reach Streams.
 
 server:
   port: 8082
@@ -28,21 +33,7 @@ management:
 info:
   app:
     name: ${spring.application.name}
-    description: Kafka Streams — orders count and revenue aggregation
+    description: Kafka Streams — orders count and revenue aggregation (all-time, windowed, joined with stores)
     version: 0.0.1-SNAPSHOT
 
-logging:
-  level:
-    com.learnkafkastreams: DEBUG
-
----
-spring:
-  config:
-    activate:
-      on-profile: local
-  kafka:
-    streams:
-      bootstrap-servers: localhost:9092
-      application-id: orders-kafka-streams
-# Serdes and exception handlers are set in OrdersStreamsConfiguration: its KafkaStreamsConfiguration
-# bean replaces Boot's, so spring.kafka.properties / spring.kafka.streams.properties never reach Streams.
+# Logging: see logback-spring.xml

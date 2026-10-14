@@ -4,6 +4,7 @@ import com.learnkafka.avro.LibraryEventAvro;
 
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
+import com.learnkafka.event.ReceivedEvent;
 import com.learnkafka.idempotency.ProcessedEventRepository;
 import com.learnkafka.mapper.LibraryEventEntityMapper;
 import com.learnkafka.jpa.LibraryEventsRepository;
@@ -47,19 +48,33 @@ public class LibraryEventsService {
     public void processLibraryEvent(ConsumerRecord<Integer, LibraryEventAvro> consumerRecord) {
         if (!processedEventRepository.markProcessed(consumerGroup, consumerRecord)) {
             // Redelivery (e.g. DB committed but the Kafka offset commit failed) — already applied
-            log.info("Skipping duplicate record topic={} partition={} offset={}",
-                    consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset());
+            log.info("Skipping duplicate record topic={} partition={} offset={} eventId={}",
+                    consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset(),
+                    ReceivedEvent.of(consumerRecord.value()).eventId());
             return;
         }
         // The value is already a typed Avro record (KafkaAvroDeserializer + Schema Registry);
         // bytes that are not valid Avro never reach here — they fail in the deserializer.
-        LibraryEvent libraryEvent = LibraryEventEntityMapper.toEntity(consumerRecord.value());
-        log.info("Processing libraryEvent : {}", libraryEvent);
+        var received = ReceivedEvent.of(consumerRecord.value());   // child event + common metadata
+        LibraryEvent libraryEvent = LibraryEventEntityMapper.toEntity(received.payload());
+        log.info("Processing {} eventId={} occurredAt={} : {}", received.eventType(), received.eventId(),
+                received.occurredAt(), libraryEvent);
 
         switch (libraryEvent.getLibraryEventType()) {
-            case NEW    -> save(libraryEvent);
+            case NEW    -> { validateNew(libraryEvent); save(libraryEvent); }
             case UPDATE -> { validate(libraryEvent); save(libraryEvent); }
             default     -> log.warn("Unsupported LibraryEventType: {}", libraryEvent.getLibraryEventType());
+        }
+    }
+
+    /**
+     * A NEW event must not carry an id: the database assigns it. With an id, save() would merge it
+     * as an existing row and Hibernate (6.6+) would fail with an optimistic-lock error on every retry.
+     * Not retryable — it can never succeed — so it goes straight to the DLT.
+     */
+    private void validateNew(LibraryEvent libraryEvent) {
+        if (libraryEvent.getLibraryEventId() != null) {
+            throw new IllegalArgumentException("NEW library event must not have an id, got " + libraryEvent.getLibraryEventId());
         }
     }
 

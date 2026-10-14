@@ -16,7 +16,7 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>learning-kafka</name>
-    <description>Root POM — Kafka learning modules: core producer/consumer, Kafka Streams, and Avro Schema Registry</description>
+    <description>Root POM — Kafka learning modules: kafka-core (Avro, Schema Registry, producer, two consumers) and kafka-stream (Kafka Streams)</description>
 
     <modules>
         <module>kafka-core</module>

@@ -1,13 +1,27 @@
 {
   "name": "LibraryEventAvro",
-  "aliases": ["LibraryEvent"],
+  "aliases": [
+    "LibraryEvent"
+  ],
   "namespace": "com.learnkafka.avro",
   "type": "record",
   "doc": "Generated as LibraryEventAvro / BookAvro / LibraryEventTypeAvro so the names never clash with the REST records or JPA entities. The aliases keep the renamed schema compatible with version 1 (LibraryEvent / Book / LibraryEventType). A library event published to the library-events topic. Registered in Schema Registry under subject library-events-value.",
   "fields": [
     {
+      "name": "metadata",
+      "type": [
+        "null",
+        "com.learnkafka.avro.EventMetadataAvro"
+      ],
+      "default": null,
+      "doc": "Base-event properties. Optional (default null) so the schema stays BACKWARD-compatible with events written before it existed."
+    },
+    {
       "name": "libraryEventId",
-      "type": ["null", "int"],
+      "type": [
+        "null",
+        "int"
+      ],
       "default": null,
       "doc": "Null for NEW events (the consumer's database assigns it); required for UPDATE."
     },
@@ -16,8 +30,13 @@
       "type": {
         "type": "enum",
         "name": "LibraryEventTypeAvro",
-        "aliases": ["LibraryEventType"],
-        "symbols": ["NEW", "UPDATE"]
+        "aliases": [
+          "LibraryEventType"
+        ],
+        "symbols": [
+          "NEW",
+          "UPDATE"
+        ]
       }
     },
     {
@@ -25,11 +44,28 @@
       "type": {
         "type": "record",
         "name": "BookAvro",
-        "aliases": ["Book"],
+        "aliases": [
+          "Book"
+        ],
         "fields": [
-          { "name": "bookId",     "type": "int" },
-          { "name": "bookName",   "type": { "type": "string", "avro.java.string": "String" } },
-          { "name": "bookAuthor", "type": { "type": "string", "avro.java.string": "String" } }
+          {
+            "name": "bookId",
+            "type": "int"
+          },
+          {
+            "name": "bookName",
+            "type": {
+              "type": "string",
+              "avro.java.string": "String"
+            }
+          },
+          {
+            "name": "bookAuthor",
+            "type": {
+              "type": "string",
+              "avro.java.string": "String"
+            }
+          }
         ]
       }
     }

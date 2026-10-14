@@ -3,8 +3,8 @@
     "locationId": "store_1234",
     "totalRevenue": {
       "locationId": "store_1234",
-      "runnuingOrderCount": 27,
-      "runningRevenue": 405.00
+      "runningOrderCount": 27,
+      "runningRevenue": 405.0
     },
     "orderType": "RESTAURANT",
     "startWindow": "2023-02-16T11:27:00",
@@ -14,8 +14,11 @@
     "locationId": "store_1234",
     "totalRevenue": {
       "locationId": "store_1234",
-      "runnuingOrderCount": 29,
-      "runningRevenue": 435.00
-    }
+      "runningOrderCount": 29,
+      "runningRevenue": 435.0
+    },
+    "orderType": "RESTAURANT",
+    "startWindow": "2023-02-16T11:27:30",
+    "endWindow": "2023-02-16T11:28:00"
   }
 ]

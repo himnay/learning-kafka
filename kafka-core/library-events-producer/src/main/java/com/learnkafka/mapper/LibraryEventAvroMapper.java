@@ -19,6 +19,7 @@ public final class LibraryEventAvroMapper {
     public static LibraryEventAvro toAvro(LibraryEvent libraryEvent) {
         var book = libraryEvent.book();
         return LibraryEventAvro.newBuilder()
+                .setMetadata(libraryEvent.metadata() != null ? libraryEvent.metadata().toAvro() : null)
                 .setLibraryEventId(libraryEvent.libraryEventId())
                 .setLibraryEventType(LibraryEventTypeAvro.valueOf(libraryEvent.libraryEventType().name()))
                 .setBook(BookAvro.newBuilder()

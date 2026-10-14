@@ -7,31 +7,32 @@
 3. 🖥️ [The Kafka cluster: 3 brokers, KRaft](#3-the-kafka-cluster-3-brokers-kraft)
 4. 🧬 [Why Avro + Schema Registry instead of JSON](#4-why-avro--schema-registry-instead-of-json)
 5. 📨 [The library event: `LibraryEvent.avsc`](#5-the-library-event-libraryeventavsc)
-6. ☕ [The coffee orders domain](#6-the-coffee-orders-domain)
-7. 🔄 [Schema evolution and compatibility modes](#7-schema-evolution-and-compatibility-modes)
-8. 📤 [Producers](#8-producers)
-9. 📥 [Consumers](#9-consumers)
-10. 👥 [Two consumers, one group: consumer-a and consumer-b](#10-two-consumers-one-group-consumer-a-and-consumer-b)
-11. 🔁 [Kafka transactions](#11-kafka-transactions)
-12. 🪪 [Idempotency: producer and consumer](#12-idempotency-producer-and-consumer)
-13. ⚠️ [Error handling: retries, recovery, dead-letter topic](#13-error-handling-retries-recovery-dead-letter-topic)
-14. ✋ [Manual offset commits](#14-manual-offset-commits)
-15. 🎯 [Delivery semantics, concretely](#15-delivery-semantics-concretely)
-16. 🗄️ [Database and Flyway migrations](#16-database-and-flyway-migrations)
-17. ⚙️ [Configuration reference](#17-configuration-reference)
-18. 🚀 [Running](#18-running)
-19. 🔍 [Inspecting the cluster and the registry](#19-inspecting-the-cluster-and-the-registry)
-20. 🪤 [Gotchas (Avro 1.12 / Spring Boot 4)](#20-gotchas-avro-112--spring-boot-4)
-21. 🔄 [Data replication with Kafka Connect, and reconciliation](#21-data-replication-with-kafka-connect-and-reconciliation)
-22. 🔁 [Non-blocking retry topics (`@RetryableTopic`)](#22-non-blocking-retry-topics-retryabletopic)
-23. 🧺 [Share groups: Kafka as a queue](#23-share-groups-kafka-as-a-queue)
-24. 🎯 [Custom partitioner and compression](#24-custom-partitioner-and-compression)
-25. 🗜️ [Compacted "latest state" topic](#25-compacted-latest-state-topic)
-26. 🆕 [KIP-848 consumer rebalance protocol](#26-kip-848-consumer-rebalance-protocol)
-27. ⏪ [Replaying records with seek](#27-replaying-records-with-seek)
-28. 🛠️ [Kafka CLI cheat sheet](#28-kafka-cli-cheat-sheet)
-29. 🔐 [Enabling TLS (SSL) and mutual TLS](#29-enabling-tls-ssl-and-mutual-tls)
-30. 🧪 [Tests](#30-tests)
+6. 🧱 [Base event: common metadata for every event](#6-base-event-common-metadata-for-every-event)
+7. ☕ [The coffee orders domain](#7-the-coffee-orders-domain)
+8. 🔄 [Schema evolution and compatibility modes](#8-schema-evolution-and-compatibility-modes)
+9. 📤 [Producers](#9-producers)
+10. 📥 [Consumers](#10-consumers)
+11. 👥 [Two consumers, one group: consumer-a and consumer-b](#11-two-consumers-one-group-consumer-a-and-consumer-b)
+12. 🔁 [Kafka transactions](#12-kafka-transactions)
+13. 🪪 [Idempotency: producer and consumer](#13-idempotency-producer-and-consumer)
+14. ⚠️ [Error handling: retries, recovery, dead-letter topic](#14-error-handling-retries-recovery-dead-letter-topic)
+15. ✋ [Manual offset commits](#15-manual-offset-commits)
+16. 🎯 [Delivery semantics, concretely](#16-delivery-semantics-concretely)
+17. 🗄️ [Database and Flyway migrations](#17-database-and-flyway-migrations)
+18. ⚙️ [Configuration reference](#18-configuration-reference)
+19. 🚀 [Running](#19-running)
+20. 🔍 [Inspecting the cluster and the registry](#20-inspecting-the-cluster-and-the-registry)
+21. 🪤 [Gotchas (Avro 1.12 / Spring Boot 4)](#21-gotchas-avro-112--spring-boot-4)
+22. 🔄 [Data replication with Kafka Connect, and reconciliation](#22-data-replication-with-kafka-connect-and-reconciliation)
+23. 🔁 [Non-blocking retry topics (`@RetryableTopic`)](#23-non-blocking-retry-topics-retryabletopic)
+24. 🧺 [Share groups: Kafka as a queue](#24-share-groups-kafka-as-a-queue)
+25. 🎯 [Custom partitioner and compression](#25-custom-partitioner-and-compression)
+26. 🗜️ [Compacted "latest state" topic](#26-compacted-latest-state-topic)
+27. 🆕 [KIP-848 consumer rebalance protocol](#27-kip-848-consumer-rebalance-protocol)
+28. ⏪ [Replaying records with seek](#28-replaying-records-with-seek)
+29. 🛠️ [Kafka CLI cheat sheet](#29-kafka-cli-cheat-sheet)
+30. 🔐 [Enabling TLS (SSL) and mutual TLS](#30-enabling-tls-ssl-and-mutual-tls)
+31. 🧪 [Tests](#31-tests)
 
 ---
 
@@ -64,7 +65,8 @@ For the broader repo architecture and core Kafka vocabulary, see the [root READM
 | Testcontainers | Kafka + PostgreSQL | integration tests |
 | Kafka Connect | `confluentinc/cp-kafka-connect:8.3.2` + JDBC connector 10.9.9 | `library-events` → PostgreSQL `events` (no code) |
 | Logback | via Spring Boot | console + rolling file logs (`logback-spring.xml`) |
-| Kafdrop | latest | web UI on `localhost:9001`, Avro-aware |
+| Kafdrop | 4.3.0 | web UI on `localhost:9001`, Avro-aware |
+| Prometheus + Grafana | v3.15.0 / 13.2.3 (root compose) | metrics + the provisioned "Learning Kafka" dashboard |
 
 ---
 
@@ -111,7 +113,7 @@ flowchart LR
 - ***One topic per domain, three partitions, three replicas*** — each partition has a leader on one broker and followers on the other two.
 - ***Two consumer apps, same consumer groups*** — `library-events-listener-group` for library events and `coffee-orders-listener-group` for coffee orders. The group coordinator splits each topic's partitions between the two apps. If one stops, the other takes them all.
 - ***Both library consumers share one database***, including the `processed_event` table, so a record redelivered to the *other* app after a rebalance is still skipped.
-- ***Kafka Connect replicates the topic*** into an `events` table in the same database, independently of the apps ([§21](#21-data-replication-with-kafka-connect-and-reconciliation)).
+- ***Kafka Connect replicates the topic*** into an `events` table in the same database, independently of the apps ([§22](#22-data-replication-with-kafka-connect-and-reconciliation)).
 
 ---
 
@@ -149,7 +151,7 @@ CurrentVoters: [1, 2, 3]
 
 - ***Leaders are spread across brokers*** so the load is shared. Which broker leads which partition can differ from run to run.
 - ***Clients bootstrap from any broker*** (`localhost:9092` is enough). The metadata response tells them every broker's address (`localhost:9092/9093/9094`), and they talk to each partition's leader directly.
-- ***If a broker dies***, the controller elects a new leader for its partitions from the in-sync followers. Try it with `docker stop kafka-core-kafka-2` and describe the topic again ([§19](#19-inspecting-the-cluster-and-the-registry)).
+- ***If a broker dies***, the controller elects a new leader for its partitions from the in-sync followers. Try it with `docker stop kafka-core-kafka-2` and describe the topic again ([§20](#20-inspecting-the-cluster-and-the-registry)).
 - `coffee-orders` is auto-created on first send with the cluster defaults (3 partitions, RF 3).
 
 ---
@@ -177,6 +179,7 @@ Avro + Schema Registry changes the contract:
 {
   "name": "LibraryEventAvro", "aliases": ["LibraryEvent"], "namespace": "com.learnkafka.avro", "type": "record",
   "fields": [
+    { "name": "metadata", "type": ["null", "com.learnkafka.avro.EventMetadataAvro"], "default": null },   // base event, §6
     { "name": "libraryEventId",   "type": ["null", "int"], "default": null },
     { "name": "libraryEventType", "type": { "type": "enum", "name": "LibraryEventTypeAvro", "aliases": ["LibraryEventType"], "symbols": ["NEW", "UPDATE"] } },
     { "name": "book", "type": { "type": "record", "name": "BookAvro", "aliases": ["Book"], "fields": [
@@ -204,8 +207,86 @@ Avro + Schema Registry changes the contract:
 
 ---
 
-<a id="6-the-coffee-orders-domain"></a>
-## <span style="color:hsl(197,80%,58%)">6. ☕ The coffee orders domain</span>
+<a id="6-base-event-common-metadata-for-every-event"></a>
+## <span style="color:hsl(26,80%,58%)">6. 🧱 Base event: common metadata for every event</span>
+
+Every event — library events and coffee orders, on the producer and on the consumer side — carries the same ***base-event metadata***:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `eventId` | UUID | unique per event; consumers dedupe on it |
+| `eventType` | string | `<Aggregate>.<Action>`: `LibraryEvent.NEW`, `LibraryEvent.UPDATE`, `CoffeeOrder.PLACED` |
+| `eventVersion` | int (default 1) | version of the event's payload contract |
+| `occurredAt` | timestamp-millis | when the event happened |
+| `source` | string | producing application (`spring.application.name`) |
+| `correlationId` | string or null | ties the event to the request that caused it (`X-Correlation-Id` header) |
+
+***In Avro: composition, not inheritance.*** Avro records can't extend each other, so the base event is its own named record, `EventMetadataAvro` (`schemas/src/main/avro/EventMetadata.avsc`), and every event schema embeds it as its first field:
+
+```json
+{ "name": "metadata", "type": ["null", "com.learnkafka.avro.EventMetadataAvro"], "default": null }
+```
+
+- ***Optional on purpose*** — with `null` as default, the new schemas stay ***BACKWARD-compatible*** with every event already on the topics. Schema Registry accepted them as `library-events-value` ***v3*** and `coffee-orders-value` ***v2***; old events simply read `metadata = null`.
+- ***Defined once*** — `EventMetadata.avsc` is compiled first (`<imports>` in `schemas/pom.xml`) and referenced by full name from `LibraryEvent.avsc` and `CoffeeOrder.avsc`, even though `CoffeeOrder` lives in another namespace.
+
+***In Java: a base interface and child events.*** The shared contract module (`schemas`) holds the Java side, so producer and consumers use the same types:
+
+```mermaid
+classDiagram
+    class BaseEvent {
+        <<interface>>
+        +metadata() EventMetadata
+        +eventId() UUID
+        +eventType() String
+        +occurredAt() Instant
+    }
+    class EventMetadata {
+        <<record>>
+        eventId · eventType · eventVersion · occurredAt · source · correlationId
+        +newEvent(type, source, correlationId)$
+        +toAvro() EventMetadataAvro
+        +fromAvro(EventMetadataAvro)$
+        +of(Object event)$ Optional
+    }
+    BaseEvent <|.. LibraryEvent : producer (REST + event)
+    BaseEvent <|.. CoffeeOrderEvent : producer
+    BaseEvent <|.. ReceivedEvent : consumer (any Avro event)
+    BaseEvent --> EventMetadata
+```
+
+- ***Records can't extend a class*** either, so `BaseEvent` is an interface whose default methods (`eventId()`, `eventType()`, `occurredAt()`) read the composed `metadata()` — the same shape as the Avro schemas.
+- ***`EventMetadata.of(event)`*** reads the `metadata` field of ***any*** generated event class (they are all `GenericRecord`s), so common handling doesn't need to know the event type.
+
+***Producer — stamping.*** `EventMetadataFactory` creates the metadata for every event: random id, current time, the app as source, and the `X-Correlation-Id` request header if present. The child events carry it into Avro (`LibraryEventAvroMapper`, `CoffeeOrdersProducer`), and the REST responses return it, so callers learn the eventId. Real response:
+
+```json
+"metadata": {"eventId": "44b660dc-ca14-4d49-a939-438d4ca0b7cc", "eventType": "LibraryEvent.NEW", "eventVersion": 1,
+             "occurredAt": "2026-10-14T05:47:01.773Z", "source": "library-events-producer", "correlationId": "e2e-req-1"}
+```
+
+***Consumers — handled once, for every event type.***
+
+| Where | What the base event gives |
+|---|---|
+| `EventMetadataMdcInterceptor` (a `RecordInterceptor` on every classic container, incl. retry/DLT ones) | puts `eventId`, `eventType`, `correlationId` into the logging MDC for the duration of the record; the barista share listener does the same itself (share containers have no interceptor) |
+| `logback-spring.xml` | every log line written while processing shows `[LibraryEvent.NEW:44b660dc-…]` — console and file |
+| `ProcessedEventRepository` + Flyway `V3` | idempotency also by `eventId`: the same event re-sent at a ***new offset*** is skipped ([§13](#13-idempotency-producer-and-consumer)) |
+| `ReceivedEvent.of(value)` | the base-event view of any received Avro event, used for logging in the library service and coffee listener |
+| Kafka Connect replica | `events` gains `event_id`, `event_type`, `event_version`, `occurred_at`, `event_source`, `correlation_id` ([§22](#22-data-replication-with-kafka-connect-and-reconciliation)) |
+
+Real consumer log, one record, three lines — all tagged with the same event:
+
+```
+[LibraryEvent.NEW:44b660dc-ca14-4d49-a939-438d4ca0b7cc] c.l.consumer.LibraryEventsConsumer : Received ConsumerRecord : ...
+[LibraryEvent.NEW:44b660dc-ca14-4d49-a939-438d4ca0b7cc] c.l.service.LibraryEventsService   : Processing LibraryEvent.NEW eventId=44b660dc-...
+[LibraryEvent.NEW:44b660dc-ca14-4d49-a939-438d4ca0b7cc] c.l.service.LibraryEventsService   : Persisted libraryEvent LibraryEvent(libraryEventId=21, ...)
+```
+
+---
+
+<a id="7-the-coffee-orders-domain"></a>
+## <span style="color:hsl(197,80%,58%)">7. ☕ The coffee orders domain</span>
 
 All coffee schemas live in `schemas/src/main/avro/` next to `LibraryEvent.avsc`. `avro-maven-plugin` (configured in `schemas/pom.xml`) compiles them to `target/generated-sources/avro` at build time — nothing generated is checked in under `src/main/java`, so `mvn clean` truly cleans them.
 
@@ -241,14 +322,14 @@ erDiagram
     }
 ```
 
-- ***Producer and consumer*** — `POST /v1/coffee-orders` lives in `library-events-producer`, and the `CoffeeOrdersConsumer` listener lives in both consumer apps ([§8](#8-producers), [§9](#9-consumers)).
+- ***Producer and consumer*** — `POST /v1/coffee-orders` lives in `library-events-producer`, and the `CoffeeOrdersConsumer` listener lives in both consumer apps ([§9](#9-producers), [§10](#10-consumers)).
 - ***Logical types*** — `CoffeeOrder.id` is `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}`. The generated classes expose idiomatic `UUID` and [`Instant`][Instant] getters/setters (`CoffeeOrdersProducer.buildCoffeeOrder()` calls `.setId(UUID.randomUUID())` and `.setOrderedTime(Instant.now())`) while the wire format stays a plain string/long. `OrderLineItem.cost` uses a `bytes` logical `decimal` (precision 3, scale 2) so [`BigDecimal`][BigDecimal] round-trips exactly; the plugin turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
 - ***A schema not yet wired to any app*** — `CoffeeUpdateEvent.avsc` (`{id, status}`, `status` enum `PROCESSING | READY_FOR_PICK_UP`) compiles alongside the others but nothing produces or consumes it. It would be its own subject (`CoffeeUpdateEvent-value` if published), showing that the registry manages compatibility ***per subject***, not globally.
 
 ---
 
-<a id="7-schema-evolution-and-compatibility-modes"></a>
-## <span style="color:hsl(335,80%,58%)">7. 🔄 Schema evolution and compatibility modes</span>
+<a id="8-schema-evolution-and-compatibility-modes"></a>
+## <span style="color:hsl(335,80%,58%)">8. 🔄 Schema evolution and compatibility modes</span>
 
 Confluent Schema Registry's default compatibility mode for a new subject is **`BACKWARD`**: a new schema version is accepted only if consumers using the *new* schema can still read data written with the *previous* one. Concretely, new fields must have a `default`, and only fields with defaults may be dropped.
 
@@ -275,8 +356,8 @@ The other modes, for contrast. None is configured here; `BACKWARD` applies becau
 
 ---
 
-<a id="8-producers"></a>
-## <span style="color:hsl(112,80%,58%)">8. 📤 Producers</span>
+<a id="9-producers"></a>
+## <span style="color:hsl(112,80%,58%)">9. 📤 Producers</span>
 
 ### <span style="color:hsl(27,80%,58%)">`LibraryEventProducer` (library-events-producer)</span>
 
@@ -288,7 +369,7 @@ Three send methods, each demonstrating a different Spring Kafka [`KafkaTemplate`
 | `sendLibraryEvent()`            | available, not wired to a controller endpoint | Async send using `kafkaTemplate.sendDefault()` (the configured default topic) — no custom headers |
 | `sendLibraryEventSynchronous()` | available, not wired to a controller endpoint | Blocks up to 1 second via `.get(1, TimeUnit.SECONDS)` — for when the caller genuinely needs a confirmed offset before responding |
 
-`LibraryEventsController` calls `sendLibraryEventWithHeaders()` for both `POST` (sets `LibraryEventType.NEW`) and `PUT` (sets `LibraryEventType.UPDATE`, and 400s if `libraryEventId` is missing) and returns `201`/`200` ***without waiting for the Kafka send to complete***. Success or failure is only seen by the `whenComplete()` callback, which logs. The REST API's availability is decoupled from Kafka's, at the cost of the HTTP response not saying whether the message reached the topic.
+`LibraryEventsController` calls `sendLibraryEventWithHeaders()` for both `POST` (sets `LibraryEventType.NEW`, and 400s if a `libraryEventId` is sent — the consumers' database assigns it) and `PUT` (sets `LibraryEventType.UPDATE`, and 400s if `libraryEventId` is missing). Both stamp the base-event metadata (eventId, type, time, source, optional `X-Correlation-Id`, [§6](#6-base-event-common-metadata-for-every-event)) and return it in the response, and they return `201`/`200` ***without waiting for the Kafka send to complete***. Success or failure is only seen by the `whenComplete()` callback, which logs. The REST API's availability is decoupled from Kafka's, at the cost of the HTTP response not saying whether the message reached the topic.
 
 ```yaml
 spring.kafka.producer:
@@ -303,7 +384,7 @@ spring.kafka.producer:
 ```
 
 - **`acks=all`** — the leader acks only once every in-sync replica has the record. With `min.insync.replicas=2` at least one follower also has it, so a leader crash right after acking doesn't lose data.
-- **`enable.idempotence=true`** — see [§12](#12-idempotency-producer-and-consumer).
+- **`enable.idempotence=true`** — see [§13](#13-idempotency-producer-and-consumer).
 - **Auto-topic-creation** (`AutoCreateConfig`) declares `library-events` with `3` partitions via [`NewTopic`][NewTopic], so the app also works against a bare broker. With docker compose, `kafka-init` has already created it with RF 3, so this is a no-op there.
 
 ### <span style="color:hsl(165,80%,58%)">`CoffeeOrdersProducer` (also in library-events-producer)</span>
@@ -317,16 +398,16 @@ kafkaTemplate.send(TOPIC, order.getId().toString(), order)        // key = order
 - ***Its own `KafkaTemplate`, not a bean.*** Coffee keys are UUID strings, library keys are Integers. `CoffeeOrdersProducer` builds a String-keyed template from Boot's producer factory (`copyWithConfigurationOverride(key.serializer=StringSerializer)`). Declaring a second `KafkaTemplate` ***bean*** would make Boot's auto-configured template (used by `LibraryEventProducer`) back off.
 - ***REST records in `domain`*** — `CoffeeOrderRequest` and `CoffeeOrderResponse` sit next to the library-event records in `com.learnkafka.domain`.
 
-`POST /v1/coffee-orders` (`CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, a real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the partition on success. It returns a `CoffeeOrderResponse` record rather than the Avro object ([§20](#20-gotchas-avro-112--spring-boot-4)).
+`POST /v1/coffee-orders` (`CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, a real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the partition on success. It returns a `CoffeeOrderResponse` record rather than the Avro object ([§21](#21-gotchas-avro-112--spring-boot-4)).
 
 ---
 
-<a id="9-consumers"></a>
-## <span style="color:hsl(304,80%,58%)">9. 📥 Consumers</span>
+<a id="10-consumers"></a>
+## <span style="color:hsl(304,80%,58%)">10. 📥 Consumers</span>
 
 ### <span style="color:hsl(54,80%,50%)">`LibraryEventsConsumer` → `LibraryEventsService` (library-events-consumer-a / -b)</span>
 
-`library-events-consumer-a` and `library-events-consumer-b` contain the same code. Only the app name, port and client id differ ([§10](#10-two-consumers-one-group-consumer-a-and-consumer-b)).
+`library-events-consumer-a` and `library-events-consumer-b` contain the same code. Only the app name, port and client id differ ([§11](#11-two-consumers-one-group-consumer-a-and-consumer-b)).
 
 ```java
 @KafkaListener(topics = {"library-events"}, groupId = "${spring.kafka.consumer.group-id}",
@@ -345,15 +426,15 @@ spring.kafka.consumer:
     specific.avro.reader: true
 ```
 
-- ***`ErrorHandlingDeserializer` wraps `KafkaAvroDeserializer`.*** Bytes that are not valid Avro become a `DeserializationException` that is dead-lettered ([§13](#13-error-handling-retries-recovery-dead-letter-topic)), instead of a poison pill that fails every `poll()`.
+- ***`ErrorHandlingDeserializer` wraps `KafkaAvroDeserializer`.*** Bytes that are not valid Avro become a `DeserializationException` that is dead-lettered ([§14](#14-error-handling-retries-recovery-dead-letter-topic)), instead of a poison pill that fails every `poll()`.
 - ***`specific.avro.reader: true`*** makes the deserializer return the typed generated class instead of a reflection-only [`GenericRecord`][GenericRecord].
 - ***`specific.avro.value.type`*** (set per listener) pins the reader class. Without it the deserializer picks the class from the ***writer's*** schema name, so records written as `LibraryEvent` (schema v1) would fail with `Could not find class com.learnkafka.avro.LibraryEvent`. It's per listener because the same apps also read `CoffeeOrder`.
 
 `processLibraryEvent()` is the Template Method. It runs in ***one database transaction*** ([`@Transactional("transactionManager")`][Transactional], the JPA transaction manager):
 
-1. ***Idempotency check*** — insert `(group, topic, partition, offset)` into `processed_event`. If the row already exists, the record was applied before: log and return ([§12](#12-idempotency-producer-and-consumer)).
-2. ***Map*** the Avro record to the JPA entity (`LibraryEventEntityMapper`).
-3. ***Dispatch by `libraryEventType`***:
+1. ***Idempotency check*** — insert `(group, topic, partition, offset)` into `processed_event`. If the row already exists, the record was applied before: log and return ([§13](#13-idempotency-producer-and-consumer)).
+2. ***Map*** the Avro record to the JPA entity (`LibraryEventEntityMapper`), seen through the base-event view `ReceivedEvent.of(value)` for logging ([§6](#6-base-event-common-metadata-for-every-event)).
+3. ***Dispatch by `libraryEventType`*** (a `NEW` that carries an id is rejected — the database assigns ids):
     - **`NEW`** → `save()` — persists `LibraryEvent` + cascaded `Book` via `LibraryEventsRepository` (Spring Data JPA → PostgreSQL).
     - **`UPDATE`** → `validate()` then `save()`. `validate()` is where the deliberately non-retryable failure lives:
 
@@ -367,7 +448,7 @@ private void validate(LibraryEvent libraryEvent) {
 }
 ```
 
-An `UPDATE` for an id that was never saved as `NEW` (or has a null id) is not a *transient* problem — retrying fails identically every time. That's why it's an [`IllegalArgumentException`][IllegalArgumentException], excluded from retry ([§13](#13-error-handling-retries-recovery-dead-letter-topic)). If any step throws, the database transaction rolls back — including the `processed_event` row — so the retry starts clean.
+An `UPDATE` for an id that was never saved as `NEW` (or has a null id) is not a *transient* problem — retrying fails identically every time. That's why it's an [`IllegalArgumentException`][IllegalArgumentException], excluded from retry ([§14](#14-error-handling-retries-recovery-dead-letter-topic)). If any step throws, the database transaction rolls back — including the `processed_event` row — so the retry starts clean.
 
 ### <span style="color:hsl(9,80%,58%)">`CoffeeOrdersConsumer` (in consumer-a and consumer-b)</span>
 
@@ -415,8 +496,8 @@ The coffee flow is the same with `CoffeeOrdersProducer`, subject `coffee-orders-
 
 ---
 
-<a id="10-two-consumers-one-group-consumer-a-and-consumer-b"></a>
-## <span style="color:hsl(195,80%,58%)">10. 👥 Two consumers, one group: consumer-a and consumer-b</span>
+<a id="11-two-consumers-one-group-consumer-a-and-consumer-b"></a>
+## <span style="color:hsl(195,80%,58%)">11. 👥 Two consumers, one group: consumer-a and consumer-b</span>
 
 | | consumer-a | consumer-b |
 |---|---|---|
@@ -427,7 +508,7 @@ The coffee flow is the same with `CoffeeOrdersProducer`, subject `coffee-orders-
 | `group-id` (library events) | `library-events-listener-group` | ***same*** |
 | `group-id` (coffee orders) | `coffee-orders-listener-group` | ***same*** |
 | Listener threads (`spring.kafka.listener.concurrency`) | 1 | 1 |
-| Group protocol | `classic` (default) | `consumer` — KIP-848 ([§26](#26-kip-848-consumer-rebalance-protocol)) |
+| Group protocol | `classic` (default) | `consumer` — KIP-848 ([§27](#27-kip-848-consumer-rebalance-protocol)) |
 
 - ***Same `group-id` = one logical consumer.*** Kafka gives each partition to exactly one member of the group, so the two apps never process the same partition at the same time.
 - ***Different `group-id`s*** would do the opposite: each app would get *every* record (pub/sub instead of load sharing).
@@ -459,8 +540,8 @@ Start consumer-a again and the partitions are shared once more. Coffee orders sp
 
 ---
 
-<a id="11-kafka-transactions"></a>
-## <span style="color:hsl(320,80%,58%)">11. 🔁 Kafka transactions</span>
+<a id="12-kafka-transactions"></a>
+## <span style="color:hsl(320,80%,58%)">12. 🔁 Kafka transactions</span>
 
 Turned on by one property in each library consumer app:
 
@@ -497,7 +578,7 @@ sequenceDiagram
 
 - ***Kafka side is atomic*** — the consumed offset and anything sent to Kafka while handling the record (DLT publish, recovery re-publish) commit together or not at all.
 - ***Database side is a separate transaction.*** Kafka cannot take part in a database transaction (there is no XA/2PC), so this is "best-effort one-phase commit": the database commits first, then Kafka.
-- ***The gap:*** if the app dies after the database commit but before the Kafka commit, the offset is not committed and the record is delivered again. The idempotent consumer ([§12](#12-idempotency-producer-and-consumer)) closes that gap.
+- ***The gap:*** if the app dies after the database commit but before the Kafka commit, the offset is not committed and the record is delivered again. The idempotent consumer ([§13](#13-idempotency-producer-and-consumer)) closes that gap.
 - ***Two transaction managers, one `@Primary`.*** `transactionManager` is a [`JpaTransactionManager`][JpaTransactionManager] declared explicitly and marked `@Primary`. Without it, Boot's JPA transaction manager can back off once a `KafkaTransactionManager` exists, and `@Transactional` would silently cover Kafka instead of the database. The service names it explicitly: `@Transactional("transactionManager")`.
 - ***`isolation.level=read_committed`*** — the consumers never see records from producer transactions that were aborted.
 - ***Sends must happen inside a transaction.*** A transactional `KafkaTemplate` refuses a send with no transaction open. Inside the listener the container has one open; elsewhere (for example in tests) use `kafkaTemplate.executeInTransaction(t -> t.sendDefault(...))`.
@@ -505,8 +586,8 @@ sequenceDiagram
 
 ---
 
-<a id="12-idempotency-producer-and-consumer"></a>
-## <span style="color:hsl(229,80%,58%)">12. 🪪 Idempotency: producer and consumer</span>
+<a id="13-idempotency-producer-and-consumer"></a>
+## <span style="color:hsl(229,80%,58%)">13. 🪪 Idempotency: producer and consumer</span>
 
 Two different problems, two different fixes:
 
@@ -515,7 +596,7 @@ Two different problems, two different fixes:
 | Duplicate it prevents | a producer ***retry*** writing the same record twice | the same record being ***applied twice*** to the database |
 | Where it lives | Kafka broker | this app's database |
 | How | producer id (PID) + per-partition sequence number; the broker drops a repeated sequence | `processed_event` row per `(group, topic, partition, offset)`, inserted in the same DB transaction |
-| Config | `enable.idempotence=true`, `acks=all`, `max.in.flight.requests.per.connection ≤ 5` | Flyway `V2__create_processed_event.sql` + `ProcessedEventRepository` |
+| Config | `enable.idempotence=true`, `acks=all`, `max.in.flight.requests.per.connection ≤ 5` | Flyway `V2__create_processed_event.sql` + `V3__add_event_id_to_processed_event.sql` + `ProcessedEventRepository` |
 | On in | the producer app and both consumer apps (required by transactions) | both consumer apps, library events only |
 
 ***Idempotent producer***
@@ -535,23 +616,26 @@ ON CONFLICT DO NOTHING            -- 0 rows inserted = already processed → ski
 
 - ***Atomic check-and-mark*** — one `INSERT ... ON CONFLICT DO NOTHING`, no "SELECT then INSERT" race between threads or between consumer-a and consumer-b.
 - ***Same transaction as the business write*** — if processing fails, the marker rolls back too, so a retry is not wrongly skipped.
-- ***Keyed by `(topic, partition, offset)`*** — this identifies one *delivery position*, which is exactly what a redelivery repeats. It does not dedupe two separate sends of the same business event (two different offsets); that would need a business key or event id in the message.
+- ***Keyed by delivery position AND by event*** — the primary key `(group, topic, partition, offset)` catches a ***redelivery*** of the same record; the unique index `(group, event_id)` catches the same ***event re-sent*** at a new offset (the base event's `eventId`, [§6](#6-base-event-common-metadata-for-every-event)). One `INSERT ... ON CONFLICT DO NOTHING` checks both. Events written before metadata existed have no `event_id` and are deduped by position only.
 - ***Shared by both apps*** — after a rebalance moves a partition from consumer-a to consumer-b, a record that a already applied is skipped by b.
 - The test `redeliveredRecord_isAppliedOnce` processes the same record twice: one row, no error. Without the marker the second `NEW` would hit the `book` primary key.
 
 ---
 
-<a id="13-error-handling-retries-recovery-dead-letter-topic"></a>
-## <span style="color:hsl(31,80%,58%)">13. ⚠️ Error handling: retries, recovery, dead-letter topic</span>
+<a id="14-error-handling-retries-recovery-dead-letter-topic"></a>
+## <span style="color:hsl(31,80%,58%)">14. ⚠️ Error handling: retries, recovery, dead-letter topic</span>
 
 With a transactional container, a failed record ***rolls the Kafka transaction back***, and Spring Kafka's [`DefaultAfterRollbackProcessor`][DefaultAfterRollbackProcessor] (not the `DefaultErrorHandler`) decides what happens next. It wraps a [`BackOff`][BackOff] policy and a [`ConsumerRecordRecoverer`][ConsumerRecordRecoverer]:
 
 ```java
 var backOff   = new FixedBackOff(1_000L, 2);       // 1s delay, 2 retries = 3 attempts total
 var processor = new DefaultAfterRollbackProcessor<>(recoverer(), backOff, kafkaTemplate, true);
-processor.addNotRetryableExceptions(IllegalArgumentException.class);
+processor.addNotRetryableExceptions(IllegalArgumentException.class, DataIntegrityViolationException.class);
 ```
 
+- ***Deterministic failures skip the retries*** — they can never succeed: an `UPDATE` for an unknown id or a `NEW` that carries an id (`IllegalArgumentException`), a `NEW` for a `book_id` that already exists (`DataIntegrityViolationException` from the primary key), and bytes that are not Avro (`DeserializationException`). Each lands on the DLT after exactly one attempt.
+- ***Why a NEW must not carry an id*** — Spring Data would `merge()` it as an existing row, and Hibernate 6.6+ rejects merging an entity whose generated id isn't in the table (`ObjectOptimisticLockingFailureException`) — on every retry. The producer answers `400` for such a POST, and the consumer rejects it too (other producers may not).
+- ***Recovery looks through the whole cause chain*** for `RecoverableDataAccessException`, since the listener's exception arrives wrapped.
 - ***`commitRecovered = true`*** — once the recoverer has handled a record, its sends (DLT / re-publish) and the record's offset commit in ***one new Kafka transaction***, so the record is never processed again.
 - ***`DeserializationException` is never retried*** (Spring Kafka's default) — bad bytes stay bad.
 
@@ -560,7 +644,7 @@ Recovery strategy (the Strategy-pattern branch inside `recoverer()`), keyed off 
 | Root cause | Behavior |
 |---|---|
 | [`RecoverableDataAccessException`][RecoverableDataAccessException] | Treated as transient — `LibraryEventsService.handleRecovery()` re-publishes the *same* key/value back onto `library-events` for a fresh pass later |
-| anything else ([`IllegalArgumentException`][IllegalArgumentException], `DeserializationException`, or any exception that survives all retries) | Routed via [`DeadLetterPublishingRecoverer`][DeadLetterPublishingRecoverer] to **`library-events.DLT`**, same partition number as the original record |
+| anything else ([`IllegalArgumentException`][IllegalArgumentException], `DataIntegrityViolationException`, `DeserializationException`, or any exception that survives all retries) | Routed via [`DeadLetterPublishingRecoverer`][DeadLetterPublishingRecoverer] to **`library-events.DLT`**, same partition number as the original record |
 
 ***What lands on the DLT*** — the library consumers publish with a [`DelegatingByTypeSerializer`][DelegatingByTypeSerializer] (set by a `DefaultKafkaProducerFactoryCustomizer` bean):
 
@@ -589,8 +673,8 @@ The partition is *not* blocked forever by a poison message, which is the whole p
 
 ---
 
-<a id="14-manual-offset-commits"></a>
-## <span style="color:hsl(84,80%,58%)">14. ✋ Manual offset commits</span>
+<a id="15-manual-offset-commits"></a>
+## <span style="color:hsl(84,80%,58%)">15. ✋ Manual offset commits</span>
 
 A second, intentionally minimal listener, `LibraryEventsConsumerManualOffset` ([`@Profile("manual-offset")`][Profile]; the default `LibraryEventsConsumer` is `@Profile("!manual-offset")`, so the two never run together), demonstrates the other end of the offset-commit spectrum:
 
@@ -610,8 +694,8 @@ With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IM
 
 ---
 
-<a id="15-delivery-semantics-concretely"></a>
-## <span style="color:hsl(158,80%,58%)">15. 🎯 Delivery semantics, concretely</span>
+<a id="16-delivery-semantics-concretely"></a>
+## <span style="color:hsl(158,80%,58%)">16. 🎯 Delivery semantics, concretely</span>
 
 - ***Producer → broker: no duplicates from retries.*** `acks=all` + idempotence means a producer retry cannot create a second broker-side write.
 - ***Broker → consumer: at-least-once delivery.*** A record can be delivered again if the app dies between the database commit and the Kafka offset commit.
@@ -622,8 +706,8 @@ With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IM
 
 ---
 
-<a id="16-database-and-flyway-migrations"></a>
-## <span style="color:hsl(14,80%,58%)">16. 🗄️ Database and Flyway migrations</span>
+<a id="17-database-and-flyway-migrations"></a>
+## <span style="color:hsl(14,80%,58%)">17. 🗄️ Database and Flyway migrations</span>
 
 ***Flyway owns the schema*** (`library-events-consumer-*/src/main/resources/db/migration`), and Hibernate only checks it (`ddl-auto: validate`) — the app fails fast at startup if the entities and tables disagree.
 
@@ -631,6 +715,7 @@ With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IM
 |---|---|
 | `V1__create_library_event_and_book.sql` | `library_event` (identity primary key, `NEW`/`UPDATE` check) and `book` (one-to-one via `library_event_id`) |
 | `V2__create_processed_event.sql` | `processed_event` — the idempotent-consumer table, primary key `(consumer_group, topic, partition_no, offset_no)` |
+| `V3__add_event_id_to_processed_event.sql` | `processed_event.event_id` (UUID) + unique index `(consumer_group, event_id)` — dedupe by the base event's `eventId` |
 
 ```
 library_event                         book
@@ -643,6 +728,7 @@ library_event_type VARCHAR(20)        book_name         VARCHAR(255)
 processed_event
 ──────────────────────────────────────────────────────
 consumer_group VARCHAR │ topic VARCHAR │ partition_no INT │ offset_no BIGINT   ← composite PK
+event_id       UUID    ← unique per consumer_group (NULL for pre-metadata events)
 processed_at   TIMESTAMPTZ DEFAULT now()
 ```
 
@@ -652,8 +738,8 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 
 ---
 
-<a id="17-configuration-reference"></a>
-## <span style="color:hsl(250,80%,58%)">17. ⚙️ Configuration reference</span>
+<a id="18-configuration-reference"></a>
+## <span style="color:hsl(250,80%,58%)">18. ⚙️ Configuration reference</span>
 
 ***Ports***
 
@@ -670,7 +756,7 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 
 (`8082` belongs to `orders-kafka-streams` in the [`kafka-stream`](../kafka-stream/README.md) module.)
 
-***One default configuration, no profiles.*** Each app has a single `application.yml` (no `local`/`prod` sections, no `spring.profiles.active`). Environment-specific values come from environment variables with local defaults: `SCHEMA_REGISTRY_URL` (default `http://localhost:8085`) and `POSTGRES_HOST/PORT/DB/USER/PASSWORD` (default the compose PostgreSQL). The only profile left is the opt-in `manual-offset` demo ([§14](#14-manual-offset-commits)).
+***One default configuration, no profiles.*** Each app has a single `application.yml` (no `local`/`prod` sections, no `spring.profiles.active`). Environment-specific values come from environment variables with local defaults: `SCHEMA_REGISTRY_URL` (default `http://localhost:8085`) and `POSTGRES_HOST/PORT/DB/USER/PASSWORD` (default the compose PostgreSQL). The only profile left is the opt-in `manual-offset` demo ([§15](#15-manual-offset-commits)).
 
 ***Consumer apps*** (`application.yml`):
 
@@ -691,9 +777,9 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | `spring.kafka.consumer.client-id` | `${spring.application.name}` | readable consumer ids in `kafka-consumer-groups` |
 | `spring.kafka.consumer.group-id` | `library-events-listener-group` | ***same*** for consumer-a and consumer-b (coffee uses `coffee-orders-listener-group`, set on its listener) |
 | `spring.kafka.listener.concurrency` | `1` | one listener thread per app |
-| `spring.kafka.producer.compression-type` | `zstd` | DLT, state-topic and retry records compressed ([§24](#24-custom-partitioner-and-compression)) |
-| `spring.kafka.consumer.properties.group.protocol` | `consumer` — ***consumer-b only*** | KIP-848 ([§26](#26-kip-848-consumer-rebalance-protocol)) |
-| `app.coffee.share-group.enabled` | `true` (default) | turns the barista share-group listener on/off ([§23](#23-share-groups-kafka-as-a-queue)) |
+| `spring.kafka.producer.compression-type` | `zstd` | DLT, state-topic and retry records compressed ([§25](#25-custom-partitioner-and-compression)) |
+| `spring.kafka.consumer.properties.group.protocol` | `consumer` — ***consumer-b only*** | KIP-848 ([§27](#27-kip-848-consumer-rebalance-protocol)) |
+| `app.coffee.share-group.enabled` | `true` (default) | turns the barista share-group listener on/off ([§24](#24-share-groups-kafka-as-a-queue)) |
 | `spring.jpa.hibernate.ddl-auto` | `validate` | Flyway owns the schema |
 | `spring.jpa.open-in-view` | `false` | no lazy loading outside transactions |
 | `spring.datasource.url` | `jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5435}/${POSTGRES_DB:library}` | compose PostgreSQL by default |
@@ -706,7 +792,7 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 - ***Levels*** — `com.learnkafka` at `DEBUG`; Kafka's `AbstractConfig` and Confluent's serializer config dumps (the long "ConsumerConfig values: ..." blocks printed on every client start) at `WARN`.
 - `<springProperty>` reads `spring.application.name`, so each app's file and log lines carry its own name.
 
-***Compose*** (`docker-compose.yml`):
+***Compose*** — `kafka-core/docker-compose.yml` is the single source of truth. The repo-root `docker-compose.yml` `include:`s it and adds Prometheus + Grafana; both use the Compose project name `kafka-core`, so running either manages the ***same*** containers and volumes:
 
 | Service | Port | Notes |
 |---|---|---|
@@ -716,15 +802,18 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | `postgres` | `5435` | `postgres:19beta3`, db/user/password `library` |
 | `kafka-connect` | `8083` | Connect worker; installs the JDBC connector on start |
 | `kafka-connect-init` | — | registers `library-events-jdbc-sink` from `connect/library-events-jdbc-sink.json`, then exits |
-| `kafdrop` | `9001` | web UI, connected to Schema Registry (container port 9000; host 9000 is often taken by local dev servers) |
+| `kafdrop` | `9001` | `kafdrop:4.3.0`, connected to Schema Registry (container port 9000; host 9000 is often taken by local dev servers) |
+| `prometheus` (root compose) | `9091` | `prometheus:v3.15.0`; scrapes the apps on the host via `host.docker.internal` (`extra_hosts: host-gateway` for plain Linux Docker) |
+| `grafana` (root compose) | `3001` | `grafana:13.2.3`, admin/admin; provisioned Prometheus datasource + the ***Learning Kafka*** dashboard (producer send rate, listener throughput/latency by result incl. retry/DLT containers, consumer lag, Streams threads/commit latency, HTTP, heap, Hikari, CPU) |
 
 ---
 
-<a id="18-running"></a>
-## <span style="color:hsl(116,80%,58%)">18. 🚀 Running</span>
+<a id="19-running"></a>
+## <span style="color:hsl(116,80%,58%)">19. 🚀 Running</span>
 
 ```bash
-# 1. From kafka-core/: 3 brokers + topics + Schema Registry + PostgreSQL + Kafdrop
+# 1. From kafka-core/ (or from the repo root to add Prometheus + Grafana — same containers):
+#    3 brokers + topics + Schema Registry + PostgreSQL + Kafka Connect + Kafdrop
 docker compose up -d
 docker logs kafka-core-kafka-init        # partition leaders/followers + active controller
 
@@ -751,12 +840,12 @@ curl -X POST localhost:8080/v1/coffee-orders -H 'Content-Type: application/json'
 
 - More ready-made requests (all PUT variants, DLT cases, coffee orders, Schema Registry, actuator) are in the repo's [`insomnia-collection.json`](../insomnia-collection.json).
 - If port `8080` is already taken on your machine, start the producer with `--server.port=8090` (or `-Dspring-boot.run.arguments=--server.port=8090`).
-- The root `docker-compose.yml` also binds `9092` and `8085`, so don't run both stacks at the same time.
+- The repo-root `docker-compose.yml` is this stack plus Prometheus (`9091`) and Grafana (`3001`) — not a second Kafka, so there is nothing to keep apart.
 
 ---
 
-<a id="19-inspecting-the-cluster-and-the-registry"></a>
-## <span style="color:hsl(347,80%,58%)">19. 🔍 Inspecting the cluster and the registry</span>
+<a id="20-inspecting-the-cluster-and-the-registry"></a>
+## <span style="color:hsl(347,80%,58%)">20. 🔍 Inspecting the cluster and the registry</span>
 
 Kafdrop: http://localhost:9001 (pick the Avro message format to decode values via Schema Registry).
 
@@ -799,19 +888,19 @@ The *Schema Registry* folder of [`insomnia-collection.json`](../insomnia-collect
 
 ---
 
-<a id="20-gotchas-avro-112--spring-boot-4"></a>
-## <span style="color:hsl(201,80%,58%)">20. 🪤 Gotchas (Avro 1.12 / Spring Boot 4)</span>
+<a id="21-gotchas-avro-112--spring-boot-4"></a>
+## <span style="color:hsl(201,80%,58%)">21. 🪤 Gotchas (Avro 1.12 / Spring Boot 4)</span>
 
 - ***Trusted packages:*** Avro ≥ 1.12.1 ([`ClassSecurityValidator`][ClassSecurityValidator], the fix for the 2025 Avro deserialization CVE) only instantiates [`SpecificRecord`][SpecificRecord] classes from trusted packages. Every app sets `org.apache.avro.SERIALIZABLE_PACKAGES=com.learnkafka.avro,com.learnavro.domain.generated` in `main()`; tests get the same value from Surefire's `systemPropertyVariables` in `kafka-core/pom.xml`. Without it every send fails with `SecurityException: Forbidden com.learnkafka.avro.LibraryEventAvro`.
-- ***Renaming an Avro record*** needs `aliases` in the new schema (or Schema Registry rejects it as incompatible), ***and*** consumers need `specific.avro.value.type`, because the specific reader looks up the Java class by the writer's name ([§5](#5-the-library-event-libraryeventavsc), [§9](#9-consumers)).
+- ***Renaming an Avro record*** needs `aliases` in the new schema (or Schema Registry rejects it as incompatible), ***and*** consumers need `specific.avro.value.type`, because the specific reader looks up the Java class by the writer's name ([§5](#5-the-library-event-libraryeventavsc), [§10](#10-consumers)).
 - ***Don't return Avro records from REST:*** Jackson walks `getSchema()` and fails (`Not an array: {...}`). The coffee endpoint returns a `CoffeeOrderResponse` record; the library endpoints return no body.
 - ***Avro strings are [`CharSequence`][CharSequence]*** ([`Utf8`][Utf8]) in the generated getters — call `.toString()` when mapping to Java types (`LibraryEventEntityMapper` does).
 - ***Named-type references:*** `"items": "OrderLineItem"` — wrapping a reference as `{"type": "OrderLineItem", "name": ...}` is invalid and Avro 1.12.2 rejects it at build time.
 - ***Boot 4 modularity:*** depend on `spring-boot-starter-kafka`, not bare `spring-kafka` — the Kafka auto-configuration ([`KafkaTemplate`][KafkaTemplate], listener container factory) lives in `spring-boot-kafka`.
 - ***`DefaultKafkaProducerFactoryCustomizer` must be a `static` `@Bean`*** in a config class that also injects the `KafkaTemplate`; otherwise the producer factory and the config class wait on each other (circular reference).
 - ***Spring's consumer factory re-configures deserializer instances*** from the consumer properties, so put `schema.registry.url` in those properties rather than calling `configure()` yourself.
-- ***Two keys types, one Boot `KafkaTemplate`*** — build extra templates from the producer factory (`copyWithConfigurationOverride`) instead of declaring another `KafkaTemplate` bean, or Boot's auto-configured one backs off ([§8](#8-producers)).
-- ***`RetryTopicConfiguration` beans match by topic*** — every `@KafkaListener` on that topic gets retry topics, including a share-group listener (which then silently runs as a classic consumer). Put `@RetryableTopic` on the one method instead ([§22](#22-non-blocking-retry-topics-retryabletopic)).
+- ***Two keys types, one Boot `KafkaTemplate`*** — build extra templates from the producer factory (`copyWithConfigurationOverride`) instead of declaring another `KafkaTemplate` bean, or Boot's auto-configured one backs off ([§9](#9-producers)).
+- ***`RetryTopicConfiguration` beans match by topic*** — every `@KafkaListener` on that topic gets retry topics, including a share-group listener (which then silently runs as a classic consumer). Put `@RetryableTopic` on the one method instead ([§23](#23-non-blocking-retry-topics-retryabletopic)).
 - ***Extra `KafkaTemplate` beans*** — declare them `@Bean(defaultCandidate = false)`: reachable by name (e.g. from `@RetryableTopic(kafkaTemplate = ...)`), ignored by Boot's `@ConditionalOnMissingBean` and by type-based injection, so Boot's own template stays.
 - ***Share consumers reject consumer-group settings*** (`isolation.level`, `auto.offset.reset`, `enable.auto.commit`, `group.protocol`, ...): copy the consumer config and remove them, or the client throws `ConfigException`.
 - ***Single-node test brokers*** need `share.coordinator.state.topic.replication.factor=1` (and `min.isr=1`) for share groups, like `transaction.state.log.*` for transactions.
@@ -819,8 +908,8 @@ The *Schema Registry* folder of [`insomnia-collection.json`](../insomnia-collect
 
 ---
 
-<a id="21-data-replication-with-kafka-connect-and-reconciliation"></a>
-## <span style="color:hsl(280,80%,58%)">21. 🔄 Data replication with Kafka Connect, and reconciliation</span>
+<a id="22-data-replication-with-kafka-connect-and-reconciliation"></a>
+## <span style="color:hsl(280,80%,58%)">22. 🔄 Data replication with Kafka Connect, and reconciliation</span>
 
 A ***Kafka Connect JDBC sink connector*** reads `library-events` and writes every record into a PostgreSQL table called `events`. No Spring Boot service is involved — the connector is just configuration ([`connect/library-events-jdbc-sink.json`](connect/library-events-jdbc-sink.json)). The table is a raw copy of ***what was sent***; the consumers' `processed_event` table records ***what was processed***. Comparing the two is reconciliation. Background: the wiki note *Kafka Connect* (connectors, workers, converters, SMTs, DLQ).
 
@@ -859,6 +948,8 @@ flowchart LR
 events
 ──────────────────────────────────────────────────────────────
 kafka_topic TEXT │ kafka_partition INT │ kafka_offset BIGINT     ← primary key
+event_id TEXT │ event_type TEXT │ event_version INT │ occurred_at TIMESTAMP │ event_source TEXT │ correlation_id TEXT
+                                                                  ← base-event metadata (§6), added by auto.evolve
 kafka_timestamp TIMESTAMP
 library_event_id INT (null for NEW) │ library_event_type TEXT
 book_id INT │ book_name TEXT │ book_author TEXT
@@ -873,6 +964,7 @@ docker exec -i kafka-core-postgres psql -U library -d library < connect/reconcil
 1. ***Summary per partition*** — sent, processed, not processed.
 2. ***Sent but never processed*** — dead-lettered (look them up on `library-events.DLT`), still in flight, or sent before `processed_event` existed.
 3. ***Processed but missing from the replica*** — should be empty; non-empty means the connector is behind or couldn't read those records.
+4. ***The same event sent more than once*** — groups the replica by `event_id`; more than one row = a producer re-send (the consumers applied it once).
 
 Real run:
 
@@ -884,7 +976,7 @@ Real run:
          2 |    1 |         1 |             0
 ```
 
-The 2 unprocessed records were exactly the two the consumers had dead-lettered: one written with schema v1 before the reader class was pinned ([§9](#9-consumers)), and one a second `NEW` for an existing `book_id`. The 6 "processed but missing" rows were plain-JSON records from before the Avro switch: the consumers of that time processed them, but the Avro converter can't read them, so the connector sent them to `library-events.connect-dlq`.
+The 2 unprocessed records were exactly the two the consumers had dead-lettered: one written with schema v1 before the reader class was pinned ([§10](#10-consumers)), and one a second `NEW` for an existing `book_id`. The 6 "processed but missing" rows were plain-JSON records from before the Avro switch: the consumers of that time processed them, but the Avro converter can't read them, so the connector sent them to `library-events.connect-dlq`.
 
 ***Things to know***
 
@@ -904,10 +996,10 @@ docker exec kafka-core-kafka-1 kafka-consumer-groups --bootstrap-server kafka-1:
 
 ---
 
-<a id="22-non-blocking-retry-topics-retryabletopic"></a>
-## <span style="color:hsl(18,80%,58%)">22. 🔁 Non-blocking retry topics (`@RetryableTopic`)</span>
+<a id="23-non-blocking-retry-topics-retryabletopic"></a>
+## <span style="color:hsl(18,80%,58%)">23. 🔁 Non-blocking retry topics (`@RetryableTopic`)</span>
 
-Library events retry ***in place*** (the partition waits — [§13](#13-error-handling-retries-recovery-dead-letter-topic)). Coffee orders show the other approach, ***error-handling pattern 3***: a failed record is moved to a ***retry topic*** and retried later, while the main topic keeps flowing.
+Library events retry ***in place*** (the partition waits — [§14](#14-error-handling-retries-recovery-dead-letter-topic)). Coffee orders show the other approach, ***error-handling pattern 3***: a failed record is moved to a ***retry topic*** and retried later, while the main topic keeps flowing.
 
 ```java
 @RetryableTopic(
@@ -930,13 +1022,13 @@ coffee-orders ──fail──▶ coffee-orders-retry-0 (≥1 s) ──fail─�
 - ***Topics and groups*** — Spring creates `coffee-orders-retry-0/1/2` and `coffee-orders-dlt` (`SUFFIX_WITH_INDEX_VALUE`; the default suffix is the delay, e.g. `-retry-1000`), each consumed by its own group (`coffee-orders-listener-group-retry-0`, ...). Consumer-a and consumer-b share them, just like the main topic.
 - ***Its own template*** — retry and DLT records keep the String key (order UUID) and are not transactional. `coffeeRetryKafkaTemplate` is a `@Bean(defaultCandidate = false)`, so Boot's auto-configured template for library events stays in place.
 - ***Trade-off*** — per-key ***ordering is lost***: later orders for the same key overtake one that is waiting in a retry topic. Fine for independent orders, wrong for "UPDATE must follow NEW".
-- ***Why on the method, not a `RetryTopicConfiguration` bean*** — a configuration bean matches ***by topic*** and also took over the barista share-group listener on `coffee-orders` ([§20](#20-gotchas-avro-112--spring-boot-4)).
+- ***Why on the method, not a `RetryTopicConfiguration` bean*** — a configuration bean matches ***by topic*** and also took over the barista share-group listener on `coffee-orders` ([§21](#21-gotchas-avro-112--spring-boot-4)).
 - ***Try it*** — the customer name drives the demo: `flaky ...` fails once on the main topic and succeeds on `-retry-0`; `fail ...` fails every attempt and lands on `coffee-orders-dlt`. Real run: `name='flaky Dennis' ... topic=coffee-orders-retry-0`, and one record on `coffee-orders-dlt` for `fail Edsger`.
 
 ---
 
-<a id="23-share-groups-kafka-as-a-queue"></a>
-## <span style="color:hsl(36,80%,58%)">23. 🧺 Share groups: Kafka as a queue</span>
+<a id="24-share-groups-kafka-as-a-queue"></a>
+## <span style="color:hsl(36,80%,58%)">24. 🧺 Share groups: Kafka as a queue</span>
 
 A ***share group*** (KIP-932, "Queues for Kafka" — GA in Kafka 4.2, as of 2026) reads the same `coffee-orders` topic as a ***work queue***: the `coffee-baristas` group has 2 barista threads in each consumer app (4 in total), and every order is made by exactly one of them.
 
@@ -975,8 +1067,8 @@ The members' assignments ***overlap*** (partition 2 was given to two barista con
 
 ---
 
-<a id="24-custom-partitioner-and-compression"></a>
-## <span style="color:hsl(54,80%,58%)">24. 🎯 Custom partitioner and compression</span>
+<a id="25-custom-partitioner-and-compression"></a>
+## <span style="color:hsl(54,80%,58%)">25. 🎯 Custom partitioner and compression</span>
 
 ***`CoffeeVipPartitioner`*** (producer app) gives VIP customers partition 0 to themselves and hashes everyone else (murmur2, like Kafka's default) over partitions 1..N-1:
 
@@ -995,8 +1087,8 @@ return 1 + Utils.toPositive(Utils.murmur2(keyBytes)) % (numPartitions - 1);
 
 ---
 
-<a id="25-compacted-latest-state-topic"></a>
-## <span style="color:hsl(72,80%,58%)">25. 🗜️ Compacted "latest state" topic</span>
+<a id="26-compacted-latest-state-topic"></a>
+## <span style="color:hsl(72,80%,58%)">26. 🗜️ Compacted "latest state" topic</span>
 
 After saving an event, the consumer publishes the ***current state*** to `library-book-state`, keyed by the database id:
 
@@ -1019,8 +1111,8 @@ Offset:4  17  {"libraryEventType":"UPDATE", "book":{"bookId":5001,"bookName":"St
 
 ---
 
-<a id="26-kip-848-consumer-rebalance-protocol"></a>
-## <span style="color:hsl(90,80%,58%)">26. 🆕 KIP-848 consumer rebalance protocol</span>
+<a id="27-kip-848-consumer-rebalance-protocol"></a>
+## <span style="color:hsl(90,80%,58%)">27. 🆕 KIP-848 consumer rebalance protocol</span>
 
 consumer-b sets `spring.kafka.consumer.properties.group.protocol: consumer` — the ***next-generation rebalance protocol*** (GA in Kafka 4.0, opt-in as of 2026). consumer-a stays on `classic`, so the same groups run ***both protocols at once***.
 
@@ -1042,8 +1134,8 @@ library-events-consumer-b-0  library-events:0,1    library-events:0,1    true
 
 ---
 
-<a id="27-replaying-records-with-seek"></a>
-## <span style="color:hsl(108,80%,58%)">27. ⏪ Replaying records with seek</span>
+<a id="28-replaying-records-with-seek"></a>
+## <span style="color:hsl(108,80%,58%)">28. ⏪ Replaying records with seek</span>
 
 Kafka keeps records for the retention period, so a consumer can ***re-read*** them by moving its position. `LibraryEventsConsumer` extends `AbstractConsumerSeekAware` (Spring Kafka gives it a seek callback per assigned partition), and `ReplayController` exposes it:
 
@@ -1060,8 +1152,8 @@ curl -X POST 'localhost:8081/v1/library-events/replay?timestamp=1760000000000'  
 
 ---
 
-<a id="28-kafka-cli-cheat-sheet"></a>
-## <span style="color:hsl(40,80%,58%)">28. 🛠️ Kafka CLI cheat sheet</span>
+<a id="29-kafka-cli-cheat-sheet"></a>
+## <span style="color:hsl(40,80%,58%)">29. 🛠️ Kafka CLI cheat sheet</span>
 
 Every command runs inside a broker container, so nothing needs installing and it works the same on Linux, macOS and Windows. Commands are for Kafka 4.x / KRaft (as of 2026): ***`--bootstrap-server` everywhere***. The old `--zookeeper` flag and the producer's `--broker-list` were removed along with ZooKeeper.
 
@@ -1096,8 +1188,8 @@ B="--bootstrap-server kafka-1:29092"
 
 ---
 
-<a id="29-enabling-tls-ssl-and-mutual-tls"></a>
-## <span style="color:hsl(0,80%,58%)">29. 🔐 Enabling TLS (SSL) and mutual TLS</span>
+<a id="30-enabling-tls-ssl-and-mutual-tls"></a>
+## <span style="color:hsl(0,80%,58%)">30. 🔐 Enabling TLS (SSL) and mutual TLS</span>
 
 The compose cluster uses `PLAINTEXT` listeners to keep the demo simple. To encrypt traffic, add a TLS listener next to them. This is a reference recipe and isn't wired into `docker-compose.yml`.
 
@@ -1173,25 +1265,27 @@ spring.kafka:
 
 ---
 
-<a id="30-tests"></a>
-## <span style="color:hsl(120,80%,58%)">30. 🧪 Tests</span>
+<a id="31-tests"></a>
+## <span style="color:hsl(120,80%,58%)">31. 🧪 Tests</span>
 
 No Schema Registry container is needed: tests point `schema.registry.url` at ***`mock://...`***, Confluent's in-memory registry shared by every serializer/deserializer in the JVM with the same scope. The library consumers also use a real ***PostgreSQL Testcontainer*** (`TestcontainersConfiguration`, [`@ServiceConnection`][ServiceConnection]), so Flyway runs the production migrations in every test run.
 
 | Module | Tests | What they cover |
 |---|---|---|
-| `library-events-producer` | 12 | `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; controller and producer unit tests; `CoffeeOrdersProducerTest` (201 + Avro order keyed by its id, 400 on a blank name) |
-| `library-events-consumer-a` / `-b` | 18 each | see below (consumer-b runs them on the KIP-848 protocol) |
+| `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
+| `library-events-producer` | 14 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; controller and producer unit tests; `CoffeeOrdersProducerTest` (201 + Avro order keyed by its id, 400 on a blank name) |
+| `library-events-consumer-a` / `-b` | 23 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
 
-- `LibraryEventsConsumerIntegrationTest` — `@EmbeddedKafka`-backed. Publishes NEW/UPDATE events (built from readable JSON by the `AvroEvents` test helper) and checks the consumer spy, service spy and database state, including "update with unknown id is consumed but not persisted". Two tests read `library-events.DLT` back: an unknown-id update arrives as Avro with `IllegalArgumentException` in `kafka_dlt-exception-cause-fqcn`, and bytes that are not Avro arrive unchanged with `DeserializationException` — the listener never runs for them. `redeliveredRecord_isAppliedOnce` proves the idempotent consumer, and `coffeeOrder_isConsumed` sends a String-keyed `CoffeeOrder` and checks the coffee listener receives it typed. Five feature tests: `flakyCoffeeOrder_succeedsOnRetryTopic`, `failingCoffeeOrder_endsOnDlt` (4 attempts, then `coffee-orders-dlt`), `processedEvent_publishesLatestState` (compacted topic keyed by the DB id), `shareGroup_releasedOrderIsRedelivered` (delivery count 1 → RELEASE → delivery 2 → ACCEPT) and `replay_redeliversAndIsSkipped`.
+- `LibraryEventsConsumerIntegrationTest` — `@EmbeddedKafka`-backed. Publishes NEW/UPDATE events (built from readable JSON by the `AvroEvents` test helper) and checks the consumer spy, service spy and database state, including "update with unknown id is consumed but not persisted". Two tests read `library-events.DLT` back: an unknown-id update arrives as Avro with `IllegalArgumentException` in `kafka_dlt-exception-cause-fqcn`, and bytes that are not Avro arrive unchanged with `DeserializationException` — the listener never runs for them. `redeliveredRecord_isAppliedOnce` proves the idempotent consumer, and `coffeeOrder_isConsumed` sends a String-keyed `CoffeeOrder` and checks the coffee listener receives it typed. Five feature tests: `flakyCoffeeOrder_succeedsOnRetryTopic`, `failingCoffeeOrder_endsOnDlt` (4 attempts, then `coffee-orders-dlt`), `processedEvent_publishesLatestState` (compacted topic keyed by the DB id), `shareGroup_releasedOrderIsRedelivered` (delivery count 1 → RELEASE → delivery 2 → ACCEPT) and `replay_redeliversAndIsSkipped`. Base event and deterministic failures: `resentEvent_sameEventId_isAppliedOnce` (same eventId at a new offset → applied once), `newEventWithId_isDeadLettered_withoutRetry` and `duplicateBookId_isDeadLettered_withoutRetry` (DLT after exactly one attempt).
 - `LibraryEventsConsumerManualOffsetTest` — runs with the `manual-offset` profile, checks that only the manual listener is active, and that its `acknowledge()` commits the offset (read back with the Kafka `Admin` client).
 - `LibraryEventsConsumerContainerTest` — Testcontainers variant with a real `cp-kafka:8.3.2` broker.
+- `EventMetadataMdcInterceptorTest` — the record's metadata goes into the MDC and is cleared afterwards; legacy records leave it empty.
 - ***Test sends use `executeInTransaction`*** because the `KafkaTemplate` is transactional. The embedded broker sets `transaction.state.log.replication.factor=1` and `min.isr=1`, since it is a single node.
 
 ```bash
-cd kafka-core && mvn -T 4 clean install         # all four modules (48 tests)
+cd kafka-core && mvn -T 4 clean install         # all four modules (65 tests)
 ```
 
 <!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->

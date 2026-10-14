@@ -1,6 +1,7 @@
 package com.learnkafka.coffee;
 
 import com.learnavro.domain.generated.CoffeeOrder;
+import com.learnkafka.event.ReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.BackOff;
@@ -56,9 +57,10 @@ public class CoffeeOrdersConsumer {
         if (name.contains("fail")) {
             throw new CoffeeMachineBusyException("Coffee machine broken for order " + order.getId());
         }
-        log.info("Received CoffeeOrder: id={} name='{}' status={} store={} topic={} partition={}",
+        var received = ReceivedEvent.of(order);   // child event + common metadata
+        log.info("Received CoffeeOrder: id={} name='{}' status={} store={} topic={} partition={} eventId={}",
                 order.getId(), order.getName(), order.getStatus(), order.getStore().getId(),
-                record.topic(), record.partition());
+                record.topic(), record.partition(), received.eventId());
     }
 
     /** Transient failure: worth retrying later without blocking the partition. */

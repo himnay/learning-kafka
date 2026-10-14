@@ -1,6 +1,7 @@
 package com.learnkafka;
 
 import com.learnkafka.avro.BookAvro;
+import com.learnkafka.event.EventMetadata;
 import com.learnkafka.avro.LibraryEventAvro;
 import com.learnkafka.avro.LibraryEventTypeAvro;
 
@@ -73,5 +74,10 @@ public final class AvroEvents {
         return CoffeeOrder.newBuilder().setId(UUID.randomUUID()).setName(name).setNickName("")
                 .setStore(store).setOrderLineItems(List.of(latte)).setOrderedTime(Instant.now())
                 .setPickUp(PickUp.IN_STORE).setStatus("NEW").build();
+    }
+
+    /** A copy of the event carrying base-event metadata (as the producer stamps it). */
+    public static LibraryEventAvro withMetadata(LibraryEventAvro event, EventMetadata metadata) {
+        return LibraryEventAvro.newBuilder(event).setMetadata(metadata.toAvro()).build();
     }
 }

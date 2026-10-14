@@ -39,6 +39,8 @@
                             <!-- Use target/generated-sources — do not pollute src/main/java -->
                             <outputDirectory>${project.build.directory}/generated-sources/avro</outputDirectory>
                             <imports>
+                                <!-- the shared base-event metadata first: LibraryEvent and CoffeeOrder reference it -->
+                                <import>${project.basedir}/src/main/avro/EventMetadata.avsc</import>
                                 <import>${project.basedir}/src/main/avro/Address.avsc</import>
                                 <import>${project.basedir}/src/main/avro/OrderId.avsc</import>
                                 <import>${project.basedir}/src/main/avro/OrderLineItem.avsc</import>

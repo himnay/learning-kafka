@@ -27,7 +27,7 @@ This document is a **conceptual deep-dive** — it explains *why* Kafka is shape
 ```
 learning-kafka/                       ← root POM (spring-boot-starter-parent)
 ├── kafka-core/                       ← Avro + Schema Registry on a 3-broker KRaft cluster (README: kafka-core/README.md)
-│   ├── schemas/                      ← Avro .avsc definitions + code generation (LibraryEvent, CoffeeOrder, ...)
+│   ├── schemas/                      ← the event contract: Avro schemas + base event (EventMetadata, BaseEvent)
 │   ├── library-events-producer/      ← REST API → Kafka: library events + coffee orders, VIP partitioner, zstd (port 8080)
 │   ├── library-events-consumer-a/    ← Kafka → PostgreSQL, transactional + idempotent, retry topics, share group, replay (port 8081)
 │   ├── library-events-consumer-b/    ← same code as a, same groups, KIP-848 group protocol (port 8086)
@@ -106,7 +106,7 @@ What this codebase guarantees:
 <ul>
 
 - `library-events-producer` sets `acks: all` (wait for all in-sync replicas) with `enable.idempotence: true` and `retries: 10` — *producer-side* sends are idempotent (no duplicate writes from producer retries) and durable.
-- `library-events-consumer-a` / `-b` use ***Kafka transactions*** (offset + DLT/re-publish commit atomically) plus an ***idempotent consumer***: the `processed_event` table in PostgreSQL records `(group, topic, partition, offset)` in the same database transaction as the business write. Delivery is still at-least-once (a crash between the DB commit and the Kafka commit redelivers the record), but the redelivery is skipped, so each record changes the database ***effectively exactly once***. Details: [`kafka-core/README.md`](kafka-core/README.md) §11–§15.
+- `library-events-consumer-a` / `-b` use ***Kafka transactions*** (offset + DLT/re-publish commit atomically) plus an ***idempotent consumer***: the `processed_event` table in PostgreSQL records `(group, topic, partition, offset)` and the base event's `eventId` in the same database transaction as the business write. Delivery is still at-least-once (a crash between the DB commit and the Kafka commit redelivers the record), but the redelivery is skipped, so each record changes the database ***effectively exactly once***. Details: [`kafka-core/README.md`](kafka-core/README.md) §12–§16.
 - Kafka Streams uses `processing.guarantee=at_least_once` by default (not overridden anywhere in `OrdersStreamsConfiguration`), so the count/revenue aggregations can, in rare failure-and-reprocessing scenarios, double-count a record. Enabling exactly-once semantics for the streams app would mean setting `processing.guarantee=exactly_once_v2`, which turns on transactional writes to the state-store changelog topics and the output topics together.
 
 </ul>
@@ -137,6 +137,8 @@ flowchart LR
         ConsumerA -->|"JPA + processed_event\n(one DB transaction)"| PG[(PostgreSQL + Flyway)]
         ConsumerB --> PG
         ConsumerA -.->|"RecoverableDataAccessException\n→ re-publish"| T1
+        T1 -->|"own consumer group"| KC["Kafka Connect\nJDBC sink :8083"]
+        KC -->|"events (replica)"| PG
     end
 
     subgraph "kafka-stream"
@@ -245,16 +247,18 @@ A second path exists for **recoverable** failures ([`RecoverableDataAccessExcept
 docker compose up -d
 ```
 
-For kafka-core's 3-broker cluster with Schema Registry, PostgreSQL and topic setup, use its own compose instead: `cd kafka-core && docker compose up -d` (Kafka on 9092–9094, Kafka Connect on 8083, Kafdrop on 9001, PostgreSQL on 5435 — see [`kafka-core/README.md`](kafka-core/README.md)). The kafka-core consumers need that PostgreSQL. Don't run both stacks at once; both bind 9092 and 8085.
+The root `docker-compose.yml` `include:`s [`kafka-core/docker-compose.yml`](kafka-core/docker-compose.yml) — the single definition of the Kafka stack — and adds Prometheus and Grafana. Both files use the Compose project name `kafka-core`, so `docker compose up -d` here or in `kafka-core/` manages the ***same*** containers and volumes (run `kafka-core/` alone if you don't need the observability pair).
 
-| Service               | URL                                   |
-|-----------------------|---------------------------------------|
-| Kafka (KRaft)         | localhost:9092                        |
-| Schema Registry       | http://localhost:8085                 |
-| Kafdrop (Kafka UI)    | http://localhost:9000                 |
-| Prometheus            | http://localhost:9091                 |
-| Grafana               | http://localhost:3001 (admin/admin)   |
-| Swagger UI (producer) | http://localhost:8080/swagger-ui.html |
+| Service | URL / port | Notes |
+|---|---|---|
+| Kafka (KRaft, 3 brokers) | `localhost:9092`, `9093`, `9094` | `broker,controller` on each node; topics created by `kafka-init` |
+| Schema Registry | http://localhost:8085 | Avro schemas |
+| PostgreSQL | `localhost:5435` (library/library) | consumer data, idempotency table, Connect replica |
+| Kafka Connect | http://localhost:8083 | JDBC sink → `events` table |
+| Kafdrop (Kafka UI) | http://localhost:9001 | Avro-aware |
+| Prometheus | http://localhost:9091 | scrapes the apps via `host.docker.internal` |
+| Grafana | http://localhost:3001 (admin/admin) | ***Learning Kafka*** dashboard, provisioned |
+| Swagger UI (producer) | http://localhost:8080/swagger-ui.html | |
 
 ### <span style="color:hsl(72,80%,58%)">2. Build all modules</span>
 
@@ -297,9 +301,19 @@ Content-Type: application/json
 }
 ```
 
-Response `201 Created`:
+Optional header `X-Correlation-Id: <anything>` — copied into the event's metadata. A `libraryEventId` in a POST is rejected with `400` (the consumers' database assigns it).
+
+Response `201 Created` — the event as published, with its base-event metadata ([kafka-core §6](kafka-core/README.md#6-base-event-common-metadata-for-every-event)):
 ```json
 {
+  "metadata": {
+    "eventId": "44b660dc-ca14-4d49-a939-438d4ca0b7cc",
+    "eventType": "LibraryEvent.NEW",
+    "eventVersion": 1,
+    "occurredAt": "2026-10-14T05:47:01.773Z",
+    "source": "library-events-producer",
+    "correlationId": "e2e-req-1"
+  },
   "libraryEventId": null,
   "libraryEventType": "NEW",
   "book": { "bookId": 456, "bookName": "Kafka Using Spring Boot", "bookAuthor": "Dilip" }
@@ -322,7 +336,15 @@ Content-Type: application/json
 }
 ```
 
-Response `200 OK`.
+Response `200 OK` with the same shape (`eventType: LibraryEvent.UPDATE`); `400` if `libraryEventId` is missing.
+
+### <span style="color:hsl(18,80%,58%)">POST /v1/coffee-orders — Place a coffee order</span>
+
+```json
+{ "name": "Ada", "nickName": "Countess" }
+```
+
+Response `201 Created`: the order's id, name, status, ordered time and its `metadata` (`eventType: CoffeeOrder.PLACED`). VIP customers (`Ada`, `Grace`) go to partition 0 — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression).
 
 ---
 
@@ -337,7 +359,19 @@ All modules expose Actuator endpoints:
 | `/actuator/prometheus` | Prometheus metrics scrape target |
 | `/actuator/info`       | Application metadata             |
 
-Import `insomnia-collection.json` into Insomnia to test all endpoints including actuator.
+Prometheus (root compose, `localhost:9091`) scrapes `/actuator/prometheus` of the producer (8080), consumer-a (8081), consumer-b (8086) and the Streams app (8082) on the host. Grafana (`localhost:3001`, admin/admin) is provisioned with the Prometheus datasource and the ***Learning Kafka*** dashboard (folder *Learning Kafka*):
+
+| Row | Panels |
+|---|---|
+| Apps | scrape targets UP/DOWN |
+| Producers | records sent per second; `KafkaTemplate` send time |
+| Consumers | records processed per second ***by result*** (every listener container, incl. retry and DLT); listener processing time; consumer lag; records fetched per second |
+| Kafka Streams | stream threads alive/failed; commit latency |
+| JVM, HTTP and database | HTTP requests per second; heap; Hikari connections in use; process CPU |
+
+Every panel query was checked against live Prometheus data. The dashboard is a JSON file in `docker/grafana/provisioning/dashboards/` (read-only in the UI — edit the file).
+
+Import `insomnia-collection.json` into Insomnia to test all endpoints — library events, coffee orders, replay, Streams queries (incl. windows and the stores join), Schema Registry, Kafka Connect and actuator.
 
 ---
 
@@ -351,6 +385,13 @@ mvn test
 # Only kafka-core tests (schemas, producer, consumer-a, consumer-b)
 cd kafka-core && mvn test
 ```
+
+| Module | Tests |
+|---|---|
+| `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
+| `kafka-core/library-events-producer` | 14 |
+| `kafka-core/library-events-consumer-a` / `-b` | 23 each (b on the KIP-848 protocol) |
+| `kafka-stream/orders-streams-app` | 20 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration |
 
 Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent's in-memory `mock://` Schema Registry. The kafka-core consumer tests need Docker: they run against a real PostgreSQL via Testcontainers, and `LibraryEventsConsumerContainerTest` also uses a real `cp-kafka:8.3.2` broker ([`ConfluentKafkaContainer`][ConfluentKafkaContainer]).
 
@@ -394,9 +435,9 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 <ul>
 
 - [`@EnableKafkaStreams`][EnableKafkaStreams] Spring Boot integration
-- `OrdersTopology` builds the Kafka Streams topology: re-key by `locationId`, branch orders by type (`GENERAL` / `RESTAURANT`), aggregate per-store count and running revenue into materialized state stores
+- `OrdersTopology` builds the Kafka Streams topology: re-key by `locationId`, branch orders by type (`GENERAL` / `RESTAURANT`), aggregate per-store count and running revenue into materialized state stores — all-time ***and per 30 s tumbling window*** (event time, 10 s grace) — and ***join*** the revenue table with the `stores` table (KTable-KTable join) into `TotalRevenueWithAddress`
 - Custom deserialization ([`RecoveringDeserializationExceptionHandler`][RecoveringDeserializationExceptionHandler] + log-and-skip) and serialization (`StreamsSerializationExceptionHandler`) exception handlers, plus a custom [`StreamsUncaughtExceptionHandler`][StreamsUncaughtExceptionHandler] that decides between replacing the stream thread and shutting the app down
-- `OrdersController` / `OrderStoreService` expose the state stores as a queryable REST API (interactive queries)
+- `OrdersController` / `OrderStoreService` expose the state stores as a queryable REST API (interactive queries): counts, revenue, revenue with store address, windowed counts and revenue (optional `from_time`/`to_time`); `503` while the stores aren't ready, `400` for an unknown order type
 - Deep dive: [`kafka-stream/README.md`](kafka-stream/README.md)
 
 </ul>
@@ -405,9 +446,11 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 
 <ul>
 
-- Avro `.avsc` schema definitions for `LibraryEvent` (generated as `LibraryEventAvro`), `CoffeeOrder`, `OrderLineItem`, `Store`, `Address`, `OrderId`, `CoffeeUpdateEvent`
+- The event ***contract*** shared by the producer and both consumers
+- Avro `.avsc` schema definitions for `LibraryEvent` (generated as `LibraryEventAvro`), `CoffeeOrder`, `OrderLineItem`, `Store`, `Address`, `OrderId`, `CoffeeUpdateEvent`, and the base event `EventMetadata` (generated as `EventMetadataAvro`) that every event embeds as its `metadata` field
+- Hand-written Java for the base event: `BaseEvent` (interface), `EventMetadata` (record, Java ↔ Avro, `of(anyEvent)`), `ReceivedEvent` (consumer-side view of any Avro event)
 - `avro-maven-plugin` generates Java classes into `target/generated-sources/avro` at build time
-- Deep dive (schema evolution, compatibility modes, logical types): [`kafka-core/README.md`](kafka-core/README.md)
+- Deep dive (base event, schema evolution, compatibility modes, logical types): [`kafka-core/README.md`](kafka-core/README.md)
 
 </ul>
 

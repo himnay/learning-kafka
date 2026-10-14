@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import com.learnkafka.AvroEvents;
 import com.learnkafka.TestcontainersConfiguration;
 import com.learnkafka.coffee.CoffeeOrdersConsumer;
+import com.learnkafka.event.EventMetadata;
 import com.learnavro.domain.generated.CoffeeOrder;
 import com.learnkafka.coffee.BaristaShareConsumer;
 import org.apache.kafka.clients.admin.Admin;
@@ -36,6 +37,8 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.annotation.Import;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -111,6 +114,9 @@ class LibraryEventsConsumerIntegrationTest {
 
     @Autowired
     ProducerFactory<Object, Object> producerFactory;
+
+    @Autowired
+    JdbcTemplate jdbcTemplate;
 
     @Autowired
     LibraryEventsRepository libraryEventsRepository;
@@ -240,6 +246,59 @@ class LibraryEventsConsumerIntegrationTest {
         assertThat(new String(dead.headers().lastHeader("kafka_dlt-exception-cause-fqcn").value(), StandardCharsets.UTF_8))
                 .isEqualTo(DeserializationException.class.getName());
         verify(libraryEventsServiceSpy, never()).processLibraryEvent(any());
+    }
+
+    @Test
+    @DisplayName("A NEW event that carries an id is not retried and lands on the dead-letter topic")
+    void newEventWithId_isDeadLettered_withoutRetry() {
+        String json = "{\"libraryEventId\":777,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":777,\"bookName\":\"Has Id\",\"bookAuthor\":\"Nobody\"}}";
+        var event = AvroEvents.fromJson(json);
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(777, event));
+
+        ConsumerRecord<Integer, byte[]> dead = awaitDeadLetter(bytes -> event.equals(AvroEvents.decode(DLT, bytes)));
+        assertThat(new String(dead.headers().lastHeader("kafka_dlt-exception-cause-fqcn").value(), StandardCharsets.UTF_8))
+                .isEqualTo(IllegalArgumentException.class.getName());
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(argThat(r -> event.equals(r.value())));
+        assertThat(libraryEventsRepository.findAll()).noneMatch(e -> e.getBook().getBookId() == 777);
+    }
+
+    @Test
+    @DisplayName("A NEW event for a book_id that already exists violates the primary key: not retried, dead-lettered")
+    void duplicateBookId_isDeadLettered_withoutRetry() {
+        String json = "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":950,\"bookName\":\"First\",\"bookAuthor\":\"Dup\"}}";
+        var first = AvroEvents.fromJson(json);
+        var duplicate = AvroEvents.fromJson(json.replace("First", "Second"));
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(first));
+        Awaitility.await().atMost(15, TimeUnit.SECONDS).until(() ->
+                libraryEventsRepository.findAll().stream().anyMatch(e -> e.getBook().getBookId() == 950));
+
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(duplicate));
+
+        ConsumerRecord<Integer, byte[]> dead = awaitDeadLetter(bytes -> duplicate.equals(AvroEvents.decode(DLT, bytes)));
+        assertThat(new String(dead.headers().lastHeader("kafka_dlt-exception-cause-fqcn").value(), StandardCharsets.UTF_8))
+                .isEqualTo(DataIntegrityViolationException.class.getName());
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(argThat(r -> duplicate.equals(r.value())));
+        assertThat(libraryEventsRepository.findAll()).filteredOn(e -> e.getBook().getBookId() == 950)
+                .singleElement().satisfies(e -> assertThat(e.getBook().getBookName()).isEqualTo("First"));
+    }
+
+    @Test
+    @DisplayName("Idempotent consumer: the same EVENT re-sent at a new offset is applied once (dedupe by eventId)")
+    void resentEvent_sameEventId_isAppliedOnce() {
+        var metadata = EventMetadata.newEvent("LibraryEvent.NEW", "test-producer", "req-960");
+        var event = AvroEvents.withMetadata(AvroEvents.fromJson(
+                "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":960,\"bookName\":\"Once\",\"bookAuthor\":\"Id\"}}"), metadata);
+
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(event));
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(event));   // same eventId, new offset
+
+        // both deliveries reach the service; the second is skipped — no book_id violation, no DLT
+        Awaitility.await().atMost(15, TimeUnit.SECONDS).untilAsserted(() ->
+                verify(libraryEventsServiceSpy, times(2)).processLibraryEvent(argThat(r -> event.equals(r.value()))));
+        assertThat(libraryEventsRepository.findAll()).filteredOn(e -> e.getBook().getBookId() == 960).hasSize(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from processed_event where event_id = ?", Integer.class, metadata.eventId()))
+                .isEqualTo(1);
     }
 
     @Test

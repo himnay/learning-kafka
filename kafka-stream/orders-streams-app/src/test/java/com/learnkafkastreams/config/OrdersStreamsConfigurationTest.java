@@ -20,7 +20,7 @@ import static org.mockito.Mockito.mock;
 class OrdersStreamsConfigurationTest {
 
     private final Properties props = new OrdersStreamsConfiguration()
-            .kStreamConfig("localhost:9092", "orders-test")
+            .kStreamConfig("localhost:9092", "orders-test", "")
             .asProperties();
 
     @Test

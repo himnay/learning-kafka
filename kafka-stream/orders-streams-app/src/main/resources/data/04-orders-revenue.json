@@ -4,7 +4,7 @@
     "orderType": "GENERAL",
     "totalRevenue": {
       "locationId": "store_1234",
-      "runnuingOrderCount": 200,
+      "runningOrderCount": 200,
       "runningRevenue": 5400.00
     }
   },
@@ -13,7 +13,7 @@
     "orderType": "GENERAL",
     "totalRevenue": {
       "locationId": "store_4567",
-      "runnuingOrderCount": 200,
+      "runningOrderCount": 200,
       "runningRevenue": 5400.00
     }
   }

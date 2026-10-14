@@ -6,13 +6,16 @@ import com.learnavro.domain.generated.OrderLineItem;
 import com.learnavro.domain.generated.PickUp;
 import com.learnavro.domain.generated.Size;
 import com.learnavro.domain.generated.Store;
+import com.learnkafka.domain.CoffeeOrderEvent;
 import com.learnkafka.domain.CoffeeOrderRequest;
 import com.learnkafka.domain.CoffeeOrderResponse;
+import jakarta.annotation.PreDestroy;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
+import com.learnkafka.event.EventMetadataFactory;
 import com.learnkafka.partitioner.CoffeeVipPartitioner;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +23,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,7 +32,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * REST endpoint that builds and publishes Avro-encoded CoffeeOrder events to Kafka.
@@ -49,36 +52,48 @@ public class CoffeeOrdersProducer {
 
     private final KafkaTemplate<String, CoffeeOrder> kafkaTemplate;
 
+    private final EventMetadataFactory eventMetadataFactory;
+
     @Autowired
     public CoffeeOrdersProducer(ProducerFactory<?, ?> producerFactory,
-                                @Value("${app.coffee.vip-customers:}") String vipCustomers) {
-        this(coffeeTemplate(producerFactory, vipCustomers));
+                                @Value("${app.coffee.vip-customers:}") String vipCustomers,
+                                EventMetadataFactory eventMetadataFactory) {
+        this(coffeeTemplate(producerFactory, vipCustomers), eventMetadataFactory);
     }
 
     /** For tests: inject the template directly. */
-    CoffeeOrdersProducer(KafkaTemplate<String, CoffeeOrder> kafkaTemplate) {
+    CoffeeOrdersProducer(KafkaTemplate<String, CoffeeOrder> kafkaTemplate, EventMetadataFactory eventMetadataFactory) {
         this.kafkaTemplate = kafkaTemplate;
+        this.eventMetadataFactory = eventMetadataFactory;
     }
 
     /**
      * Boot's producer settings, plus: String keys, and the VIP partitioner (only for coffee orders).
-     * The VIP names reach the partitioner's configure() as a producer property.
+     * The VIP names reach the partitioner's configure() as a producer property. Passing the
+     * overrides to KafkaTemplate makes it own the copied producer factory, so destroy() closes it.
      */
     @SuppressWarnings("unchecked")
     private static KafkaTemplate<String, CoffeeOrder> coffeeTemplate(ProducerFactory<?, ?> producerFactory, String vipCustomers) {
-        var coffeeFactory = ((ProducerFactory<String, CoffeeOrder>) producerFactory)
-                .copyWithConfigurationOverride(Map.of(
-                        ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
-                        ProducerConfig.PARTITIONER_CLASS_CONFIG, CoffeeVipPartitioner.class,
-                        CoffeeVipPartitioner.VIP_CUSTOMERS_CONFIG, vipCustomers));
-        return new KafkaTemplate<>(coffeeFactory);
+        return new KafkaTemplate<>((ProducerFactory<String, CoffeeOrder>) producerFactory, false, Map.of(
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.PARTITIONER_CLASS_CONFIG, CoffeeVipPartitioner.class,
+                CoffeeVipPartitioner.VIP_CUSTOMERS_CONFIG, vipCustomers));
+    }
+
+    /** The template is not a Spring bean, so close its producers when the app stops. */
+    @PreDestroy
+    void close() {
+        kafkaTemplate.destroy();
     }
 
     /** Publishes coffee order. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CoffeeOrderResponse publishCoffeeOrder(@RequestBody @Valid CoffeeOrderRequest request) {
-        var order = buildCoffeeOrder(request);
+    public CoffeeOrderResponse publishCoffeeOrder(
+            @RequestBody @Valid CoffeeOrderRequest request,
+            @RequestHeader(name = "X-Correlation-Id", required = false) String correlationId) {
+        var event = CoffeeOrderEvent.placed(eventMetadataFactory.newEvent(CoffeeOrderEvent.PLACED, correlationId), request);
+        var order = buildCoffeeOrder(event);
         kafkaTemplate.send(TOPIC, order.getId().toString(), order)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
@@ -88,10 +103,10 @@ public class CoffeeOrdersProducer {
                                 order.getId(), result.getRecordMetadata().partition());
                     }
                 });
-        return CoffeeOrderResponse.from(order);
+        return CoffeeOrderResponse.from(order, event.metadata());
     }
 
-    private CoffeeOrder buildCoffeeOrder(CoffeeOrderRequest request) {
+    private CoffeeOrder buildCoffeeOrder(CoffeeOrderEvent event) {
         var address = Address.newBuilder()
                 .setAddressLine1("123 Coffee Lane")
                 .setCity("Seattle")
@@ -113,9 +128,10 @@ public class CoffeeOrdersProducer {
                 .build();
 
         return CoffeeOrder.newBuilder()
-                .setId(UUID.randomUUID())
-                .setName(request.name())
-                .setNickName(request.nickName() != null ? request.nickName() : "")
+                .setMetadata(event.metadata().toAvro())
+                .setId(event.orderId())
+                .setName(event.name())
+                .setNickName(event.nickName())
                 .setStore(store)
                 .setOrderLineItems(List.of(lineItem))
                 .setOrderedTime(Instant.now())

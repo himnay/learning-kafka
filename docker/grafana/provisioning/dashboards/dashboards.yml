@@ -1,0 +1,11 @@
+apiVersion: 1
+
+# Loads every *.json dashboard in this directory (mounted read-only) into the "Learning Kafka" folder.
+providers:
+  - name: learning-kafka
+    folder: Learning Kafka
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

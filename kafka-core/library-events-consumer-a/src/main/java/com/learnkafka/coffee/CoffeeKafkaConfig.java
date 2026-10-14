@@ -1,9 +1,11 @@
 package com.learnkafka.coffee;
 
+import com.learnkafka.event.EventMetadataMdcInterceptor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -59,6 +61,7 @@ public class CoffeeKafkaConfig {
         factory.setConsumerFactory(kafkaConsumerFactory);
         factory.setConcurrency(concurrency);
         factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, 2)));
+        factory.setRecordInterceptor(new EventMetadataMdcInterceptor());   // base-event metadata → MDC (retry topics too)
         return factory;
     }
 
@@ -71,11 +74,21 @@ public class CoffeeKafkaConfig {
      * ignores it, so Boot's auto-configured KafkaTemplate (used for library events) stays in place.
      */
     @Bean(name = COFFEE_RETRY_TEMPLATE, defaultCandidate = false)
-    public KafkaTemplate<Object, Object> coffeeRetryKafkaTemplate(ProducerFactory<Object, Object> producerFactory) {
+    public KafkaTemplate<Object, Object> coffeeRetryKafkaTemplate(
+            @Qualifier("coffeeRetryProducerFactory") ProducerFactory<Object, Object> coffeeRetryProducerFactory) {
+        return new KafkaTemplate<>(coffeeRetryProducerFactory);
+    }
+
+    /**
+     * Its producer factory is a bean too, so Spring closes the producers on shutdown
+     * (a KafkaTemplate only closes a factory it created itself).
+     */
+    @Bean(defaultCandidate = false)
+    public DefaultKafkaProducerFactory<Object, Object> coffeeRetryProducerFactory(ProducerFactory<Object, Object> producerFactory) {
         var configs = new HashMap<>(producerFactory.getConfigurationProperties());
         configs.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         var valueSerializer = ((DefaultKafkaProducerFactory<Object, Object>) producerFactory).getValueSerializerSupplier();
-        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<Object, Object>(configs, null, valueSerializer));
+        return new DefaultKafkaProducerFactory<>(configs, null, valueSerializer);
     }
 
     /**

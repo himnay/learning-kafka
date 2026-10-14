@@ -13,6 +13,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -74,7 +75,7 @@ public class LibraryEventProducer {
     }
 
     private ProducerRecord<Integer, LibraryEventAvro> buildProducerRecord(Integer key, LibraryEventAvro value, String topic) {
-        List<Header> headers = List.of(new RecordHeader("event-source", "scanner".getBytes()));
+        List<Header> headers = List.of(new RecordHeader("event-source", "scanner".getBytes(StandardCharsets.UTF_8)));
         return new ProducerRecord<>(topic, null, key, value, headers);
     }
 

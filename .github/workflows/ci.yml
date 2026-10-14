@@ -32,6 +32,13 @@ jobs:
       - name: Install super-pom
         run: mvn -B -N install
         working-directory: super-pom
+      - name: Validate Docker Compose files
+        # the root compose include:s kafka-core/docker-compose.yml — check both resolve
+        run: |
+          docker compose config -q
+          docker compose -f kafka-core/docker-compose.yml config -q
+        working-directory: learning-kafka
       - name: Build and test
+        # Testcontainers (PostgreSQL, cp-kafka) needs Docker — available on GitHub's Ubuntu runners
         run: mvn -B verify
         working-directory: learning-kafka

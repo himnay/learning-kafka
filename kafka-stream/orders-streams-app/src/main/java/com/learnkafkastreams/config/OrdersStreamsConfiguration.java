@@ -39,10 +39,20 @@ public class OrdersStreamsConfiguration {
     @Bean(name = KafkaStreamsDefaultConfiguration.DEFAULT_STREAMS_CONFIG_BEAN_NAME)
     public KafkaStreamsConfiguration kStreamConfig(
             @Value("${spring.kafka.streams.bootstrap-servers}") String bootstrapServers,
-            @Value("${spring.kafka.streams.application-id}") String applicationId) {
+            @Value("${spring.kafka.streams.application-id}") String applicationId,
+            @Value("${spring.kafka.streams.state-dir:}") String stateDir) {
         var props = new HashMap<String, Object>();
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
+        // KTables are cached and only flushed DOWNSTREAM on commit (default every 30 s with at-least-once).
+        // The revenue ⋈ stores join sits downstream of the cached revenue table, so commit every second
+        // to make joined results visible within ~1 s. Interactive queries on the aggregate stores themselves
+        // read through the cache and are always current.
+        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 1_000);
+        if (!stateDir.isBlank()) {
+            // where RocksDB keeps the state stores (default: <java.io.tmpdir>/kafka-streams)
+            props.put(StreamsConfig.STATE_DIR_CONFIG, stateDir);
+        }
         props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
@@ -68,12 +78,12 @@ public class OrdersStreamsConfiguration {
     /** Defines the orders topic bean. */
     @Bean
     public NewTopic ordersTopic() {
-        return TopicBuilder.name(OrdersTopology.ORDERS).partitions(2).replicas(1).build();
+        return TopicBuilder.name(OrdersTopology.ORDERS).partitions(2).build();   // RF: broker default
     }
 
     /** Defines the stores topic bean. */
     @Bean
     public NewTopic storesTopic() {
-        return TopicBuilder.name(OrdersTopology.STORES).partitions(2).replicas(1).build();
+        return TopicBuilder.name(OrdersTopology.STORES).partitions(2).build();   // RF: broker default
     }
 }

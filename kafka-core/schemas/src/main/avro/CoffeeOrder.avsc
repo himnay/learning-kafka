@@ -4,6 +4,15 @@
   "type": "record",
   "fields": [
     {
+      "name": "metadata",
+      "type": [
+        "null",
+        "com.learnkafka.avro.EventMetadataAvro"
+      ],
+      "default": null,
+      "doc": "Base-event properties. Optional (default null) so the schema stays BACKWARD-compatible with events written before it existed."
+    },
+    {
       "name": "id",
       "type": {
         "type": "string",

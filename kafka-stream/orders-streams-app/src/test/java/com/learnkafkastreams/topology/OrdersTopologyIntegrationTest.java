@@ -1,5 +1,8 @@
 package com.learnkafkastreams.topology;
 
+import com.learnkafkastreams.domain.Address;
+import com.learnkafkastreams.domain.Store;
+import com.learnkafkastreams.service.OrderStoreService;
 import com.learnkafkastreams.domain.Order;
 import com.learnkafkastreams.domain.OrderLineItem;
 import com.learnkafkastreams.domain.OrderType;
@@ -31,6 +34,7 @@ import static com.learnkafkastreams.topology.OrdersTopology.GENERAL_ORDERS_COUNT
 import static com.learnkafkastreams.topology.OrdersTopology.GENERAL_ORDERS_REVENUE;
 import static com.learnkafkastreams.topology.OrdersTopology.ORDERS;
 import static com.learnkafkastreams.topology.OrdersTopology.STORES;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -40,6 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 @TestPropertySource(properties = {
         "spring.kafka.streams.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.streams.application-id=orders-integration-test",
+        // fresh RocksDB state per test context: every context (DirtiesContext) gets a new embedded broker
+        "spring.kafka.streams.state-dir=${java.io.tmpdir}/orders-streams-it-${random.uuid}",
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}"
 })
 class OrdersTopologyIntegrationTest {
@@ -53,15 +59,15 @@ class OrdersTopologyIntegrationTest {
     @Autowired
     ObjectMapper objectMapper;
 
+    @Autowired
+    OrderStoreService orderStoreService;
+
     @BeforeEach
-    void waitForStreamsRunning() throws InterruptedException {
-        KafkaStreams streams;
-        do {
-            streams = streamsBuilderFactoryBean.getKafkaStreams();
-            if (streams == null || streams.state() != KafkaStreams.State.RUNNING) {
-                Thread.sleep(100);
-            }
-        } while (streams == null || streams.state() != KafkaStreams.State.RUNNING);
+    void waitForStreamsRunning() {
+        Awaitility.await().atMost(30, TimeUnit.SECONDS).until(() -> {
+            var streams = streamsBuilderFactoryBean.getKafkaStreams();
+            return streams != null && streams.state() == KafkaStreams.State.RUNNING;
+        });
     }
 
     @Test
@@ -85,6 +91,46 @@ class OrdersTopologyIntegrationTest {
                     assertEquals(new BigDecimal("27.00"), revenue.runningRevenue());
                     assertEquals(1, revenue.runningOrderCount());
                 });
+    }
+
+    @Test
+    @DisplayName("Windowed counts and revenue joined with the store are queryable through OrderStoreService")
+    void windowsAndJoin_queryableThroughService() {
+        publishStores();
+        publishOrders();
+
+        Awaitility.await()
+                .atMost(20, TimeUnit.SECONDS)
+                .untilAsserted(() -> {
+                    // order time 2023-02-21T21:25:01 → window [21:25:00, 21:25:30)
+                    assertThat(orderStoreService.getOrderCountWindows("general", null, null))
+                            .singleElement()
+                            .satisfies(w -> {
+                                assertEquals("store_1234", w.locationId());
+                                assertEquals(1L, w.orderCount());
+                                assertEquals(LocalDateTime.parse("2023-02-21T21:25:00"), w.startWindow());
+                                assertEquals(LocalDateTime.parse("2023-02-21T21:25:30"), w.endWindow());
+                            });
+                    assertThat(orderStoreService.getOrderCountWindows("general",
+                            LocalDateTime.parse("2023-02-21T21:26:00"), LocalDateTime.parse("2023-02-21T21:30:00")))
+                            .isEmpty();
+
+                    assertThat(orderStoreService.getOrderRevenueWithAddress("restaurant"))
+                            .singleElement()
+                            .satisfies(j -> {
+                                assertEquals(new BigDecimal("15.00"), j.totalRevenue().runningRevenue());
+                                assertEquals("City1", j.store().address().city());
+                            });
+                });
+    }
+
+    private void publishStores() {
+        var store = new Store("store_1234", new Address("1234 Street 1", "", "City1", "State1", "12345"), "1234567890");
+        try {
+            kafkaTemplate.send(STORES, store.locationId(), objectMapper.writeValueAsString(store));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void publishOrders() {

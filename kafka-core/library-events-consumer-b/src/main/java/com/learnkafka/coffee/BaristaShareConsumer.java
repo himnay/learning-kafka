@@ -1,6 +1,8 @@
 package com.learnkafka.coffee;
 
 import com.learnavro.domain.generated.CoffeeOrder;
+import com.learnkafka.event.EventMetadataMdcInterceptor;
+import com.learnkafka.event.ReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,7 +21,7 @@ import java.util.Locale;
  * Each record is acknowledged individually (ShareAckMode.MANUAL):
  *  - acknowledge() = ACCEPT  → done
  *  - release()     = RELEASE → back to the queue, redelivered (maybe to another barista), delivery count + 1
- *  - reject()      = REJECT  → poison, never redelivered
+ *  - reject()      = REJECT  → poison, never redelivered (used for records that are not valid Avro)
  * Demo: a customer name starting with "busy" is released on its first delivery and accepted on the next.
  */
 @Slf4j
@@ -33,6 +35,22 @@ public class BaristaShareConsumer {
             containerFactory = CoffeeKafkaConfig.BARISTA_SHARE_CONTAINER_FACTORY)
     public void onMessage(ConsumerRecord<String, CoffeeOrder> record, ShareAcknowledgment acknowledgment) {
         var order = record.value();
+        if (order == null) {
+            // ErrorHandlingDeserializer hands over null when the bytes are not valid Avro: a poison record
+            log.warn("Barista REJECT undeserializable record partition={} offset={}", record.partition(), record.offset());
+            acknowledgment.reject();
+            return;
+        }
+        // share containers have no RecordInterceptor: put the base-event metadata into the MDC here
+        EventMetadataMdcInterceptor.put(ReceivedEvent.of(order).metadata());
+        try {
+            makeOrder(record, order, acknowledgment);
+        } finally {
+            EventMetadataMdcInterceptor.clear();
+        }
+    }
+
+    private void makeOrder(ConsumerRecord<String, CoffeeOrder> record, CoffeeOrder order, ShareAcknowledgment acknowledgment) {
         short deliveryCount = record.deliveryCount().orElse((short) 1);
         if (order.getName().toString().toLowerCase(Locale.ROOT).startsWith("busy") && deliveryCount == 1) {
             log.info("Barista busy — RELEASE order id={} (delivery {}) partition={}",

@@ -33,6 +33,7 @@ import org.springframework.web.client.RestClient;
 import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @EmbeddedKafka(topics = {"library-events"}, partitions = 3)
@@ -95,7 +96,8 @@ class LibraryEventsControllerIntegrationTest {
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
 
         var record = KafkaTestUtils.getSingleRecord(consumer, "library-events");
-        assertEquals(avroEvent(null, "NEW", 123), record.value());
+        assertEquals(avroEvent(null, "NEW", 123), withoutMetadata(record.value()));
+        assertMetadata(record.value(), "LibraryEvent.NEW");
     }
 
     @Test
@@ -114,7 +116,8 @@ class LibraryEventsControllerIntegrationTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
 
         var record = KafkaTestUtils.getSingleRecord(consumer, "library-events");
-        assertEquals(avroEvent(123, "UPDATE", 456), record.value());
+        assertEquals(avroEvent(123, "UPDATE", 456), withoutMetadata(record.value()));
+        assertMetadata(record.value(), "LibraryEvent.UPDATE");
     }
 
     /** The Avro record the consumer should read back (Avro records implement equals()). */
@@ -125,5 +128,20 @@ class LibraryEventsControllerIntegrationTest {
                 .setBook(BookAvro.newBuilder()
                         .setBookId(bookId).setBookName("Kafka using Spring Boot").setBookAuthor("Dilip").build())
                 .build();
+    }
+
+    /** The base-event metadata is stamped by the producer: random id, current time, the app as source. */
+    private static void assertMetadata(LibraryEventAvro value, String expectedType) {
+        var metadata = value.getMetadata();
+        assertNotNull(metadata);
+        assertNotNull(metadata.getEventId());
+        assertNotNull(metadata.getOccurredAt());
+        assertEquals(expectedType, metadata.getEventType().toString());
+        assertEquals("library-events-producer", metadata.getSource().toString());
+        assertEquals(1, metadata.getEventVersion());
+    }
+
+    private static LibraryEventAvro withoutMetadata(LibraryEventAvro value) {
+        return LibraryEventAvro.newBuilder(value).setMetadata(null).build();
     }
 }

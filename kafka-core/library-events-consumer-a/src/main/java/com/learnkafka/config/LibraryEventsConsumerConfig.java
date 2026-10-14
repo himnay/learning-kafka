@@ -1,5 +1,6 @@
 package com.learnkafka.config;
 
+import com.learnkafka.event.EventMetadataMdcInterceptor;
 import com.learnkafka.service.LibraryEventsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.RecoverableDataAccessException;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -126,6 +128,7 @@ public class LibraryEventsConsumerConfig {
         var factory = new ConcurrentKafkaListenerContainerFactory<Object, Object>();
         factory.setConsumerFactory(kafkaConsumerFactory);
         factory.setConcurrency(concurrency);
+        factory.setRecordInterceptor(new EventMetadataMdcInterceptor());   // base-event metadata → MDC
         // Kafka transaction per record: offsets + any sends commit atomically
         factory.getContainerProperties().setKafkaAwareTransactionManager(kafkaTransactionManager);
         factory.setAfterRollbackProcessor(afterRollbackProcessor());
@@ -136,14 +139,16 @@ public class LibraryEventsConsumerConfig {
      * With a transactional container the AfterRollbackProcessor (not the CommonErrorHandler)
      * decides what happens after a failed record rolls the transaction back.
      * - FixedBackOff: 1 s delay, 2 retries (3 total attempts)
-     * - IllegalArgumentException is not retried — skips to recoverer immediately
+     * - IllegalArgumentException and DataIntegrityViolationException are not retried — straight to the recoverer
      * - commitRecovered=true: the recoverer's sends (DLT / re-publish) and the recovered
      *   record's offset commit in ONE new Kafka transaction, so it is never reprocessed
      */
     private DefaultAfterRollbackProcessor<Object, Object> afterRollbackProcessor() {
         var backOff = new FixedBackOff(1_000L, 2);
         var processor = new DefaultAfterRollbackProcessor<>(recoverer(), backOff, kafkaTemplate, true);
-        processor.addNotRetryableExceptions(IllegalArgumentException.class);
+        // Deterministic failures never succeed on a retry: invalid events, and constraint violations
+        // such as a NEW event for a book_id that already exists
+        processor.addNotRetryableExceptions(IllegalArgumentException.class, DataIntegrityViolationException.class);
         return processor;
     }
 
@@ -160,8 +165,9 @@ public class LibraryEventsConsumerConfig {
                 });
 
         return (record, ex) -> {
-            var cause = ex.getCause() != null ? ex.getCause() : ex;
-            if (cause instanceof RecoverableDataAccessException) {
+            // The listener's exception arrives wrapped (ListenerExecutionFailedException, possibly
+            // more layers from the transaction proxy), so search the whole cause chain
+            if (hasCause(ex, RecoverableDataAccessException.class)) {
                 log.info("Recoverable exception — re-publishing record: key={}", record.key());
                 libraryEventsService.handleRecovery((ConsumerRecord<Integer, ?>) record)
                         .whenComplete((result, throwable) -> {
@@ -176,10 +182,19 @@ public class LibraryEventsConsumerConfig {
         };
     }
 
+    private static boolean hasCause(Throwable ex, Class<? extends Throwable> type) {
+        for (Throwable t = ex; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (type.isInstance(t)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Defines the library events dlt bean. */
     @Bean
     public NewTopic libraryEventsDlt() {
-        return TopicBuilder.name(DLT_TOPIC).partitions(3).replicas(1).build();
+        return TopicBuilder.name(DLT_TOPIC).partitions(3).build();   // RF: broker default
     }
 
     /**
@@ -190,6 +205,6 @@ public class LibraryEventsConsumerConfig {
      */
     @Bean
     public NewTopic libraryBookState() {
-        return TopicBuilder.name(LibraryEventsService.STATE_TOPIC).partitions(3).replicas(1).compact().build();
+        return TopicBuilder.name(LibraryEventsService.STATE_TOPIC).partitions(3).compact().build();   // RF: broker default
     }
 }
