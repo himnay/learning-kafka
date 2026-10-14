@@ -1,8 +1,11 @@
 package com.learnkafka.producer;
 
-import tools.jackson.databind.ObjectMapper;
+import com.learnkafka.avro.LibraryEventAvro;
+
 import com.learnkafka.domain.Book;
 import com.learnkafka.domain.LibraryEvent;
+import com.learnkafka.domain.LibraryEventType;
+import com.learnkafka.mapper.LibraryEventAvroMapper;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -11,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
@@ -28,10 +30,7 @@ import static org.mockito.Mockito.when;
 class LibraryEventProducerUnitTest {
 
     @Mock
-    KafkaTemplate<Integer, String> kafkaTemplate;
-
-    @Spy
-    ObjectMapper objectMapper = new ObjectMapper();
+    KafkaTemplate<Integer, LibraryEventAvro> kafkaTemplate;
 
     @InjectMocks
     LibraryEventProducer eventProducer;
@@ -41,13 +40,13 @@ class LibraryEventProducerUnitTest {
     }
 
     private LibraryEvent buildEvent() {
-        return LibraryEvent.builder().libraryEventId(null).book(buildBook()).build();
+        return LibraryEvent.builder().libraryEventId(null).libraryEventType(LibraryEventType.NEW).book(buildBook()).build();
     }
 
     @Test
     @DisplayName("Producer send failure propagates the underlying Kafka exception to the caller")
     void sendLibraryEventWithHeaders_failure() throws ExecutionException, InterruptedException {
-        CompletableFuture<SendResult<Integer, String>> future = new CompletableFuture<>();
+        CompletableFuture<SendResult<Integer, LibraryEventAvro>> future = new CompletableFuture<>();
         future.completeExceptionally(new RuntimeException("Exception Calling Kafka"));
         when(kafkaTemplate.send(isA(ProducerRecord.class))).thenReturn(future);
 
@@ -58,13 +57,13 @@ class LibraryEventProducerUnitTest {
     @DisplayName("Producer successfully sends the library event and returns the resulting record metadata")
     void sendLibraryEventWithHeaders_success() throws ExecutionException, InterruptedException {
         var libraryEvent = buildEvent();
-        var record = objectMapper.writeValueAsString(libraryEvent);
+        var record = LibraryEventAvroMapper.toAvro(libraryEvent);
 
-        var producerRecord = new ProducerRecord<Integer, String>("library-events", libraryEvent.libraryEventId(), record);
+        var producerRecord = new ProducerRecord<Integer, LibraryEventAvro>("library-events", libraryEvent.libraryEventId(), record);
         var recordMetadata  = new RecordMetadata(new TopicPartition("library-events", 1), 1, 1, System.currentTimeMillis(), 1, 2);
         var sendResult       = new SendResult<>(producerRecord, recordMetadata);
 
-        CompletableFuture<SendResult<Integer, String>> future = CompletableFuture.completedFuture(sendResult);
+        CompletableFuture<SendResult<Integer, LibraryEventAvro>> future = CompletableFuture.completedFuture(sendResult);
         when(kafkaTemplate.send(isA(ProducerRecord.class))).thenReturn(future);
 
         var result = eventProducer.sendLibraryEventWithHeaders(libraryEvent).get();

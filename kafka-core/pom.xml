@@ -13,11 +13,13 @@
     <artifactId>kafka-core</artifactId>
     <packaging>pom</packaging>
     <name>kafka-core</name>
-    <description>Kafka Core — library events producer and consumer with Spring Kafka</description>
+    <description>Kafka Core — library events and coffee orders as Avro on Confluent Schema Registry: one producer, two transactional idempotent consumers</description>
 
     <modules>
+        <module>schemas</module>
         <module>library-events-producer</module>
-        <module>library-events-consumer</module>
+        <module>library-events-consumer-a</module>
+        <module>library-events-consumer-b</module>
     </modules>
 
     <dependencies>
@@ -52,4 +54,20 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Avro >= 1.12.1 (ClassSecurityValidator) only (de)serializes SpecificRecord classes from
+                 trusted packages. Each app sets this in main(); tests don't run main(), so set it here. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <org.apache.avro.SERIALIZABLE_PACKAGES>com.learnkafka.avro,com.learnavro.domain.generated</org.apache.avro.SERIALIZABLE_PACKAGES>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

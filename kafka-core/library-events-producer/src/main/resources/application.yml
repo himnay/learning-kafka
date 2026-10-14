@@ -1,11 +1,32 @@
 spring:
   application:
     name: library-events-producer
-  profiles:
-    active: local
   threads:
     virtual:
       enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092          # any broker of the 3-node cluster; clients discover the rest
+    template:
+      default-topic: library-events
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.IntegerSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      # Compress whole batches on the producer. The broker stores them as-is (topic
+      # compression.type=producer) and consumers decompress — less network and disk.
+      compression-type: zstd
+      properties:
+        acks: all
+        retries: 10
+        retry.backoff.ms: 1000
+        enable.idempotence: "true"
+        # Confluent Schema Registry (kafka-core docker compose). The serializer registers each
+        # schema on first send: subjects "library-events-value" and "coffee-orders-value".
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
+
+app:
+  coffee:
+    # CoffeeVipPartitioner sends these customers' orders to partition 0
+    vip-customers: Ada,Grace
 
 server:
   port: 8080
@@ -25,46 +46,7 @@ management:
 info:
   app:
     name: ${spring.application.name}
-    description: REST API that publishes library events to Kafka
+    description: REST API that publishes Avro library events and coffee orders to Kafka
     version: 0.0.1-SNAPSHOT
 
-logging:
-  level:
-    com.learnkafka: DEBUG
-
----
-spring:
-  config:
-    activate:
-      on-profile: local
-  kafka:
-    template:
-      default-topic: library-events
-    producer:
-      bootstrap-servers: localhost:9092
-      key-serializer: org.apache.kafka.common.serialization.IntegerSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-      properties:
-        acks: all
-        retries: 10
-        retry.backoff.ms: 1000
-        enable.idempotence: "true"
-    admin:
-      properties:
-        bootstrap.servers: localhost:9092
-
----
-spring:
-  config:
-    activate:
-      on-profile: prod
-  kafka:
-    template:
-      default-topic: library-events
-    producer:
-      bootstrap-servers: prod-kafka:9092
-      key-serializer: org.apache.kafka.common.serialization.IntegerSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-      properties:
-        acks: all
-        retries: 10
+# Logging: see logback-spring.xml

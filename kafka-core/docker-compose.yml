@@ -1,57 +1,237 @@
 services:
 
-  # ── Kafka (KRaft mode — no Zookeeper) ─────────────────────────────────────
-  kafka:
+  # ── Kafka cluster: 3 nodes, KRaft mode (no Zookeeper) ──────────────────────
+  # Every node runs BOTH roles (process.roles=broker,controller):
+  #   - broker:     stores partition replicas; for each partition one broker is
+  #                 the LEADER, the other two are FOLLOWERS (spread across nodes)
+  #   - controller: all 3 are quorum voters; Raft elects ONE active controller,
+  #                 the other 2 are hot standbys (tolerates 1 node down)
+  # Host ports: 9092 / 9093 / 9094 — clients bootstrap from any of them.
+
+  kafka-1:
     image: confluentinc/cp-kafka:8.3.2
-    container_name: kafka-core-kafka
+    container_name: kafka-core-kafka-1
     ports:
       - "9092:9092"
-    environment:
-      # KRaft: this node is both broker and controller
+    environment: &kafka-env
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093
 
       # Listeners
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
 
-      # Topic defaults
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Replication — every partition gets 1 leader + 2 followers
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
 
-      # Stable cluster ID (base64-encoded 16-byte UUID — fixed to keep volumes stable)
+      # Stable cluster ID (base64-encoded 16-byte UUID) — must be the same on all nodes
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
 
     volumes:
-      - kafka-core-kafka-data:/var/lib/kafka/data
+      - kafka-core-kafka-1-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka-1:29092"]
       interval: 15s
       timeout: 30s
       retries: 5
       start_period: 30s
+
+  kafka-2:
+    image: confluentinc/cp-kafka:8.3.2
+    container_name: kafka-core-kafka-2
+    ports:
+      - "9093:9093"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: PLAINTEXT://kafka-2:29092,CONTROLLER://kafka-2:29093,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:9093
+    volumes:
+      - kafka-core-kafka-2-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka-2:29092"]
+      interval: 15s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  kafka-3:
+    image: confluentinc/cp-kafka:8.3.2
+    container_name: kafka-core-kafka-3
+    ports:
+      - "9094:9094"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: PLAINTEXT://kafka-3:29092,CONTROLLER://kafka-3:29093,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:9094
+    volumes:
+      - kafka-core-kafka-3-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka-3:29092"]
+      interval: 15s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  # ── One-shot topic setup: 3 partitions × 3 replicas ───────────────────────
+  # Leaders are spread across brokers (e.g. P0 → 1, P1 → 2, P2 → 3);
+  # the other two brokers hold follower replicas of each partition.
+  kafka-init:
+    image: confluentinc/cp-kafka:8.3.2
+    container_name: kafka-core-kafka-init
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for t in library-events library-events.DLT; do
+          kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists \
+            --topic "$$t" --partitions 3 --replication-factor 3 --config min.insync.replicas=2
+        done
+        # Compacted: latest state per libraryEventId (only the newest record per key is kept)
+        kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists \
+          --topic library-book-state --partitions 3 --replication-factor 3 \
+          --config min.insync.replicas=2 --config cleanup.policy=compact \
+          --config segment.ms=60000 --config min.cleanable.dirty.ratio=0.01
+        kafka-topics --bootstrap-server kafka-1:29092 --describe --topic library-events
+        kafka-metadata-quorum --bootstrap-server kafka-1:29092 describe --status
+    restart: "no"
+
+  # ── Confluent Schema Registry — Avro schemas for library-events and coffee orders ──
+  # Stores schemas in the replicated _schemas topic (RF 3 on this cluster).
+  schema-registry:
+    image: confluentinc/cp-schema-registry:8.3.2
+    container_name: kafka-core-schema-registry
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
+    ports:
+      - "8085:8081"   # host 8085 (8081 is consumer-a)
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    healthcheck:
+      # image has no curl: plain HTTP request over bash's /dev/tcp
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081 && printf 'GET /subjects HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ── PostgreSQL — library events store (same image as learning-totp) ──────
+  postgres:
+    image: postgres:19beta3  # PostgreSQL 19 is still in beta (as of 2026); use 18 for anything stable
+    container_name: kafka-core-postgres
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_DB: library
+      POSTGRES_USER: library
+      POSTGRES_PASSWORD: library
+    volumes:
+      - kafka-core-postgres-data:/var/lib/postgresql   # PG18+: mount the parent dir (versioned subdir layout)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U library -d library"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kafka Connect — replicate library-events into PostgreSQL table "events" ──
+  # A JDBC SINK connector does what a hand-written consumer app would: it reads the topic
+  # (its own consumer group "connect-library-events-jdbc-sink", independent of the apps)
+  # and upserts every record keyed by (topic, partition, offset). The table is a raw copy of
+  # what the producer sent, for reconciliation against what the consumers processed.
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:8.3.2
+    container_name: kafka-core-kafka-connect
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
+      schema-registry: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    ports:
+      - "8083:8083"   # Connect REST API
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_GROUP_ID: kafka-core-connect
+      # Connect stores connector configs, source offsets and status in these topics
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      # lets a connector override its own consumer settings (isolation.level=read_committed)
+      CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY: All
+    command:
+      - bash
+      - -c
+      - |
+        # JDBC connector (bundles the PostgreSQL driver). Confluent Community License: free to self-host.
+        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.9.9
+        exec /etc/confluent/docker/run
+    healthcheck:
+      # image has no curl: plain HTTP request over bash's /dev/tcp
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8083 && printf 'GET /connector-plugins HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q 'JdbcSinkConnector' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  # ── One-shot: register (or update) the JDBC sink connector ─────────────────
+  kafka-connect-init:
+    image: curlimages/curl:8.11.1
+    container_name: kafka-core-kafka-connect-init
+    depends_on:
+      kafka-connect: { condition: service_healthy }
+    volumes:
+      - ./connect:/connect:ro
+    # PUT .../config creates the connector or updates it — safe to re-run
+    command: >
+      -sS -f -X PUT -H "Content-Type: application/json"
+      --data @/connect/library-events-jdbc-sink.json
+      http://kafka-connect:8083/connectors/library-events-jdbc-sink/config
+    restart: "no"
 
   # ── Kafdrop — Kafka Web UI ─────────────────────────────────────────────────
   kafdrop:
     image: obsidiandynamics/kafdrop:latest
     container_name: kafka-core-kafdrop
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
     ports:
-      - "9000:9000"
+      - "9001:9000"   # host 9001 (9000 often taken by local dev servers)
     environment:
-      KAFKA_BROKERCONNECT: kafka:29092
+      KAFKA_BROKERCONNECT: kafka-1:29092,kafka-2:29092,kafka-3:29092
       SERVER_SERVLET_CONTEXTPATH: /
-      CMD_ARGS: "--message.format=DEFAULT --topic.deleteEnabled=true"
+      CMD_ARGS: "--message.format=DEFAULT --topic.deleteEnabled=true --schemaregistry.connect=http://schema-registry:8081"
     restart: unless-stopped
 
 volumes:
-  kafka-core-kafka-data:
+  kafka-core-kafka-1-data:
+  kafka-core-kafka-2-data:
+  kafka-core-kafka-3-data:
+  kafka-core-postgres-data:

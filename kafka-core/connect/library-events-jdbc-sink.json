@@ -1,0 +1,37 @@
+{
+  "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+  "tasks.max": "3",
+  "topics": "library-events",
+
+  "connection.url": "jdbc:postgresql://postgres:5432/library",
+  "connection.user": "library",
+  "connection.password": "library",
+
+  "key.converter": "org.apache.kafka.connect.converters.IntegerConverter",
+  "value.converter": "io.confluent.connect.avro.AvroConverter",
+  "value.converter.schema.registry.url": "http://schema-registry:8081",
+
+  "consumer.override.isolation.level": "read_committed",
+
+  "transforms": "flatten,rename,ts",
+  "transforms.flatten.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+  "transforms.flatten.delimiter": "_",
+  "transforms.rename.type": "org.apache.kafka.connect.transforms.ReplaceField$Value",
+  "transforms.rename.renames": "libraryEventId:library_event_id,libraryEventType:library_event_type,book_bookId:book_id,book_bookName:book_name,book_bookAuthor:book_author",
+  "transforms.ts.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+  "transforms.ts.timestamp.field": "kafka_timestamp",
+
+  "table.name.format": "events",
+  "insert.mode": "upsert",
+  "pk.mode": "kafka",
+  "pk.fields": "kafka_topic,kafka_partition,kafka_offset",
+  "auto.create": "true",
+  "auto.evolve": "true",
+
+  "errors.tolerance": "all",
+  "errors.log.enable": "true",
+  "errors.log.include.messages": "true",
+  "errors.deadletterqueue.topic.name": "library-events.connect-dlq",
+  "errors.deadletterqueue.topic.replication.factor": "3",
+  "errors.deadletterqueue.context.headers.enable": "true"
+}

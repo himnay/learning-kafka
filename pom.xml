@@ -21,7 +21,6 @@
     <modules>
         <module>kafka-core</module>
         <module>kafka-stream</module>
-        <module>kafka-schema-registry</module>
     </modules>
 
     <build>

@@ -1,24 +1,22 @@
 {
   "_type": "export",
   "__export_format": 4,
-  "__export_date": "2026-06-13T00:00:00.000Z",
+  "__export_date": "2026-10-14T00:00:00.000Z",
   "__export_source": "learning-kafka",
   "resources": [
     {
       "_id": "wrk_learning_kafka",
       "_type": "workspace",
       "name": "Learning Kafka",
-      "description": "Kafka Core Producer/Consumer + Schema Registry APIs"
+      "description": "kafka-core (Avro + Schema Registry, 3-broker KRaft) and kafka-stream APIs"
     },
-
     {
       "_id": "fld_kafka_core",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Kafka Core — Library Events Producer",
-      "description": "REST endpoints on port 8080"
+      "name": "Kafka Core — Library Events (producer :8080)",
+      "description": "POST creates a NEW event (libraryEventId must be null); PUT sends an UPDATE (libraryEventId required). Published as Avro (subject library-events-value)."
     },
-
     {
       "_id": "req_post_library_event",
       "_type": "request",
@@ -27,53 +25,584 @@
       "method": "POST",
       "url": "http://localhost:8080/v1/libraryevent",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
       ],
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"libraryEventId\": null,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
       }
     },
-
     {
       "_id": "req_put_library_event",
       "_type": "request",
       "parentId": "fld_kafka_core",
-      "name": "PUT — Update Library Event",
+      "name": "PUT — Update Library Event (id 1)",
       "method": "PUT",
       "url": "http://localhost:8080/v1/libraryevent",
+      "description": "Id 1 must exist (created by an earlier POST) — otherwise the consumers dead-letter it.",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"libraryEventId\": 1,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot 3.x\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+        "text": "{\n  \"libraryEventId\": 1,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot 2.X\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
       }
     },
-
+    {
+      "_id": "req_put_library_event_2",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "PUT — Update Library Event (id 2)",
+      "method": "PUT",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": 2,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot 2.X\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+      }
+    },
+    {
+      "_id": "req_put_library_event_unknown_123",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "PUT — Unknown Id 123 (→ library-events.DLT)",
+      "method": "PUT",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "description": "Accepted by the producer (200), but the consumer's validate() throws IllegalArgumentException → not retried → dead-lettered to library-events.DLT.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": 123,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+      }
+    },
+    {
+      "_id": "req_put_library_event_unknown_999",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "PUT — Unknown Id 999 (→ library-events.DLT)",
+      "method": "PUT",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": 999,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+      }
+    },
+    {
+      "_id": "req_put_library_event_no_id",
+      "_type": "request",
+      "parentId": "fld_kafka_core",
+      "name": "PUT — Without Id (400)",
+      "method": "PUT",
+      "url": "http://localhost:8080/v1/libraryevent",
+      "description": "Rejected by the producer: PUT requires libraryEventId.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"libraryEventId\": null,\n  \"book\": {\n    \"bookId\": 456,\n    \"bookName\": \"Kafka Using Spring Boot\",\n    \"bookAuthor\": \"Dilip\"\n  }\n}"
+      }
+    },
     {
       "_id": "req_post_library_event_invalid",
       "_type": "request",
       "parentId": "fld_kafka_core",
-      "name": "POST — Create Invalid Event (400)",
+      "name": "POST — Invalid Event, missing book fields (400)",
       "method": "POST",
       "url": "http://localhost:8080/v1/libraryevent",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
       ],
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"libraryEventId\": null,\n  \"book\": {\n    \"bookId\": null,\n    \"bookName\": \"Missing Fields Test\",\n    \"bookAuthor\": null\n  }\n}"
       }
     },
-
+    {
+      "_id": "fld_coffee_orders",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Kafka Core — Coffee Orders (producer :8080)",
+      "description": "Builds an Avro CoffeeOrder (subject coffee-orders-value) and publishes it to coffee-orders; consumed by consumer-a / consumer-b."
+    },
+    {
+      "_id": "req_post_coffee_order",
+      "_type": "request",
+      "parentId": "fld_coffee_orders",
+      "name": "POST — Create Coffee Order",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/coffee-orders",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Ada\",\n  \"nickName\": \"Countess\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_coffee_order_blank",
+      "_type": "request",
+      "parentId": "fld_coffee_orders",
+      "name": "POST — Blank Name (400)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/coffee-orders",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_coffee_vip",
+      "_type": "request",
+      "parentId": "fld_coffee_orders",
+      "name": "POST — VIP customer (→ partition 0)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/coffee-orders",
+      "description": "CoffeeVipPartitioner: Ada and Grace always go to partition 0.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Grace\",\n  \"nickName\": \"VIP\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_coffee_flaky",
+      "_type": "request",
+      "parentId": "fld_coffee_orders",
+      "name": "POST — Flaky order (succeeds on coffee-orders-retry-0)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/coffee-orders",
+      "description": "Fails once on the main topic, succeeds on the first retry topic (@RetryableTopic).",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"flaky Dennis\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_coffee_fail",
+      "_type": "request",
+      "parentId": "fld_coffee_orders",
+      "name": "POST — Failing order (→ coffee-orders-dlt)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/coffee-orders",
+      "description": "Fails on every attempt: retry-0, retry-1, retry-2, then coffee-orders-dlt.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"fail Edsger\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_coffee_busy",
+      "_type": "request",
+      "parentId": "fld_coffee_orders",
+      "name": "POST — Busy barista (share group RELEASE, redelivered)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/coffee-orders",
+      "description": "Share group coffee-baristas releases it on delivery 1 and accepts it on delivery 2.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"busy Barbara\"\n}"
+      }
+    },
+    {
+      "_id": "fld_schema_registry",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Schema Registry (:8085)",
+      "description": "Confluent Schema Registry from the kafka-core docker compose."
+    },
+    {
+      "_id": "req_sr_subjects",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — Subjects",
+      "method": "GET",
+      "url": "http://localhost:8085/subjects"
+    },
+    {
+      "_id": "req_sr_library_latest",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — library-events-value latest",
+      "method": "GET",
+      "url": "http://localhost:8085/subjects/library-events-value/versions/latest"
+    },
+    {
+      "_id": "req_sr_library_versions",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — library-events-value versions",
+      "method": "GET",
+      "url": "http://localhost:8085/subjects/library-events-value/versions"
+    },
+    {
+      "_id": "req_sr_coffee_latest",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — coffee-orders-value latest",
+      "method": "GET",
+      "url": "http://localhost:8085/subjects/coffee-orders-value/versions/latest"
+    },
+    {
+      "_id": "req_sr_schema_by_id",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — Schema by id (1)",
+      "method": "GET",
+      "url": "http://localhost:8085/schemas/ids/1"
+    },
+    {
+      "_id": "req_sr_types",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — Schema types",
+      "method": "GET",
+      "url": "http://localhost:8085/schemas/types"
+    },
+    {
+      "_id": "req_sr_config",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — Global compatibility",
+      "method": "GET",
+      "url": "http://localhost:8085/config"
+    },
+    {
+      "_id": "req_sr_config_subject",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "GET — library-events-value compatibility",
+      "method": "GET",
+      "url": "http://localhost:8085/config/library-events-value"
+    },
+    {
+      "_id": "req_sr_set_backward",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "PUT — library-events-value compatibility BACKWARD",
+      "method": "PUT",
+      "url": "http://localhost:8085/config/library-events-value",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"compatibility\": \"BACKWARD\"\n}"
+      }
+    },
+    {
+      "_id": "req_sr_set_backward_transitive",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "PUT — library-events-value compatibility BACKWARD_TRANSITIVE",
+      "method": "PUT",
+      "url": "http://localhost:8085/config/library-events-value",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"compatibility\": \"BACKWARD_TRANSITIVE\"\n}"
+      }
+    },
+    {
+      "_id": "req_sr_set_forward",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "PUT — library-events-value compatibility FORWARD",
+      "method": "PUT",
+      "url": "http://localhost:8085/config/library-events-value",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"compatibility\": \"FORWARD\"\n}"
+      }
+    },
+    {
+      "_id": "req_sr_set_forward_transitive",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "PUT — library-events-value compatibility FORWARD_TRANSITIVE",
+      "method": "PUT",
+      "url": "http://localhost:8085/config/library-events-value",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"compatibility\": \"FORWARD_TRANSITIVE\"\n}"
+      }
+    },
+    {
+      "_id": "req_sr_set_full",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "PUT — library-events-value compatibility FULL",
+      "method": "PUT",
+      "url": "http://localhost:8085/config/library-events-value",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"compatibility\": \"FULL\"\n}"
+      }
+    },
+    {
+      "_id": "req_sr_set_none",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "PUT — library-events-value compatibility NONE",
+      "method": "PUT",
+      "url": "http://localhost:8085/config/library-events-value",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"compatibility\": \"NONE\"\n}"
+      }
+    },
+    {
+      "_id": "req_sr_delete_subject",
+      "_type": "request",
+      "parentId": "fld_schema_registry",
+      "name": "DELETE — coffee-orders-value subject (soft delete)",
+      "method": "DELETE",
+      "url": "http://localhost:8085/subjects/coffee-orders-value"
+    },
+    {
+      "_id": "fld_replay",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Replay — library-events (consumer-a :8081 / consumer-b :8086)",
+      "description": "Seek a partition back. Only the app that owns the partition can do it (the other answers 409); replayed records are skipped by the idempotent consumer."
+    },
+    {
+      "_id": "req_replay_partitions_a",
+      "_type": "request",
+      "parentId": "fld_replay",
+      "name": "GET — Partitions owned by consumer-a",
+      "method": "GET",
+      "url": "http://localhost:8081/v1/library-events/replay/partitions"
+    },
+    {
+      "_id": "req_replay_offset_a",
+      "_type": "request",
+      "parentId": "fld_replay",
+      "name": "POST — consumer-a: replay partition 0 from offset 0",
+      "method": "POST",
+      "url": "http://localhost:8081/v1/library-events/replay?partition=0&offset=0"
+    },
+    {
+      "_id": "req_replay_ts_a",
+      "_type": "request",
+      "parentId": "fld_replay",
+      "name": "POST — consumer-a: replay owned partitions from a timestamp",
+      "method": "POST",
+      "url": "http://localhost:8081/v1/library-events/replay?timestamp=0"
+    },
+    {
+      "_id": "req_replay_partitions_b",
+      "_type": "request",
+      "parentId": "fld_replay",
+      "name": "GET — Partitions owned by consumer-b",
+      "method": "GET",
+      "url": "http://localhost:8086/v1/library-events/replay/partitions"
+    },
+    {
+      "_id": "req_replay_offset_b",
+      "_type": "request",
+      "parentId": "fld_replay",
+      "name": "POST — consumer-b: replay partition 0 from offset 0",
+      "method": "POST",
+      "url": "http://localhost:8086/v1/library-events/replay?partition=0&offset=0"
+    },
+    {
+      "_id": "req_replay_ts_b",
+      "_type": "request",
+      "parentId": "fld_replay",
+      "name": "POST — consumer-b: replay owned partitions from a timestamp",
+      "method": "POST",
+      "url": "http://localhost:8086/v1/library-events/replay?timestamp=0"
+    },
+    {
+      "_id": "fld_kafka_connect",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Kafka Connect (:8083)",
+      "description": "JDBC sink replicating library-events into PostgreSQL table events."
+    },
+    {
+      "_id": "req_kc_plugins",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "GET — Connector plugins",
+      "method": "GET",
+      "url": "http://localhost:8083/connector-plugins"
+    },
+    {
+      "_id": "req_kc_list",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "GET — Connectors",
+      "method": "GET",
+      "url": "http://localhost:8083/connectors"
+    },
+    {
+      "_id": "req_kc_status",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "GET — Sink status",
+      "method": "GET",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink/status"
+    },
+    {
+      "_id": "req_kc_config",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "GET — Sink config",
+      "method": "GET",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink/config"
+    },
+    {
+      "_id": "req_kc_put_config",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "PUT — Create/update sink",
+      "method": "PUT",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink/config",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"connector.class\": \"io.confluent.connect.jdbc.JdbcSinkConnector\",\n  \"tasks.max\": \"3\",\n  \"topics\": \"library-events\",\n\n  \"connection.url\": \"jdbc:postgresql://postgres:5432/library\",\n  \"connection.user\": \"library\",\n  \"connection.password\": \"library\",\n\n  \"key.converter\": \"org.apache.kafka.connect.converters.IntegerConverter\",\n  \"value.converter\": \"io.confluent.connect.avro.AvroConverter\",\n  \"value.converter.schema.registry.url\": \"http://schema-registry:8081\",\n\n  \"consumer.override.isolation.level\": \"read_committed\",\n\n  \"transforms\": \"flatten,rename,ts\",\n  \"transforms.flatten.type\": \"org.apache.kafka.connect.transforms.Flatten$Value\",\n  \"transforms.flatten.delimiter\": \"_\",\n  \"transforms.rename.type\": \"org.apache.kafka.connect.transforms.ReplaceField$Value\",\n  \"transforms.rename.renames\": \"libraryEventId:library_event_id,libraryEventType:library_event_type,book_bookId:book_id,book_bookName:book_name,book_bookAuthor:book_author\",\n  \"transforms.ts.type\": \"org.apache.kafka.connect.transforms.InsertField$Value\",\n  \"transforms.ts.timestamp.field\": \"kafka_timestamp\",\n\n  \"table.name.format\": \"events\",\n  \"insert.mode\": \"upsert\",\n  \"pk.mode\": \"kafka\",\n  \"pk.fields\": \"kafka_topic,kafka_partition,kafka_offset\",\n  \"auto.create\": \"true\",\n  \"auto.evolve\": \"true\",\n\n  \"errors.tolerance\": \"all\",\n  \"errors.log.enable\": \"true\",\n  \"errors.log.include.messages\": \"true\",\n  \"errors.deadletterqueue.topic.name\": \"library-events.connect-dlq\",\n  \"errors.deadletterqueue.topic.replication.factor\": \"3\",\n  \"errors.deadletterqueue.context.headers.enable\": \"true\"\n}\n"
+      }
+    },
+    {
+      "_id": "req_kc_restart",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "POST — Restart sink (with tasks)",
+      "method": "POST",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink/restart?includeTasks=true"
+    },
+    {
+      "_id": "req_kc_pause",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "PUT — Pause sink",
+      "method": "PUT",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink/pause"
+    },
+    {
+      "_id": "req_kc_resume",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "PUT — Resume sink",
+      "method": "PUT",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink/resume"
+    },
+    {
+      "_id": "req_kc_delete",
+      "_type": "request",
+      "parentId": "fld_kafka_connect",
+      "name": "DELETE — Delete sink",
+      "method": "DELETE",
+      "url": "http://localhost:8083/connectors/library-events-jdbc-sink"
+    },
     {
       "_id": "fld_actuator_producer",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Library Events Producer (8080)"
+      "name": "Actuator — Library Events Producer (8080)",
+      "description": "http://localhost:8080/actuator"
     },
-
     {
       "_id": "req_health_producer",
       "_type": "request",
@@ -82,7 +611,6 @@
       "method": "GET",
       "url": "http://localhost:8080/actuator/health"
     },
-
     {
       "_id": "req_metrics_producer",
       "_type": "request",
@@ -91,14 +619,13 @@
       "method": "GET",
       "url": "http://localhost:8080/actuator/prometheus"
     },
-
     {
       "_id": "fld_actuator_consumer",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Library Events Consumer (8081)"
+      "name": "Actuator — Library Events Consumer A (8081)",
+      "description": "http://localhost:8081/actuator"
     },
-
     {
       "_id": "req_health_consumer",
       "_type": "request",
@@ -107,7 +634,6 @@
       "method": "GET",
       "url": "http://localhost:8081/actuator/health"
     },
-
     {
       "_id": "req_metrics_consumer",
       "_type": "request",
@@ -116,14 +642,36 @@
       "method": "GET",
       "url": "http://localhost:8081/actuator/prometheus"
     },
-
+    {
+      "_id": "fld_actuator_consumer_b",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Actuator — Library Events Consumer B (8086)",
+      "description": "http://localhost:8086/actuator"
+    },
+    {
+      "_id": "req_health_consumer_b",
+      "_type": "request",
+      "parentId": "fld_actuator_consumer_b",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8086/actuator/health"
+    },
+    {
+      "_id": "req_metrics_consumer_b",
+      "_type": "request",
+      "parentId": "fld_actuator_consumer_b",
+      "name": "GET — Prometheus Metrics",
+      "method": "GET",
+      "url": "http://localhost:8086/actuator/prometheus"
+    },
     {
       "_id": "fld_streams",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Orders Kafka Streams (8082)"
+      "name": "Actuator — Orders Kafka Streams (8082)",
+      "description": "http://localhost:8082/actuator"
     },
-
     {
       "_id": "req_health_streams",
       "_type": "request",
@@ -132,7 +680,6 @@
       "method": "GET",
       "url": "http://localhost:8082/actuator/health"
     },
-
     {
       "_id": "req_metrics_streams",
       "_type": "request",
@@ -140,38 +687,6 @@
       "name": "GET — Prometheus Metrics",
       "method": "GET",
       "url": "http://localhost:8082/actuator/prometheus"
-    },
-
-    {
-      "_id": "fld_schema",
-      "_type": "request_group",
-      "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Coffee Orders Service (8083)"
-    },
-
-    {
-      "_id": "req_health_schema_service",
-      "_type": "request",
-      "parentId": "fld_schema",
-      "name": "GET — Health",
-      "method": "GET",
-      "url": "http://localhost:8083/actuator/health"
-    },
-
-    {
-      "_id": "fld_schema_consumer",
-      "_type": "request_group",
-      "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Coffee Orders Consumer (8084)"
-    },
-
-    {
-      "_id": "req_health_schema_consumer",
-      "_type": "request",
-      "parentId": "fld_schema_consumer",
-      "name": "GET — Health",
-      "method": "GET",
-      "url": "http://localhost:8084/actuator/health"
     }
   ]
 }

@@ -1,10 +1,17 @@
 package com.learnkafka.controller;
 
+import com.learnkafka.avro.BookAvro;
+import com.learnkafka.avro.LibraryEventAvro;
+import com.learnkafka.avro.LibraryEventTypeAvro;
+
 import com.learnkafka.domain.Book;
 import com.learnkafka.domain.LibraryEvent;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
-import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.Deserializer;
+import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,9 +40,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @TestPropertySource(properties = {
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
-        "spring.kafka.producer.properties.enable.idempotence=false"
+        "spring.kafka.producer.properties.enable.idempotence=false",
+        // Confluent's in-memory Schema Registry, shared by every client using the same mock:// scope
+        "spring.kafka.producer.properties.schema.registry.url=" + LibraryEventsControllerIntegrationTest.REGISTRY
 })
 class LibraryEventsControllerIntegrationTest {
+
+    static final String REGISTRY = "mock://library-events-producer-test";
 
     @LocalServerPort
     int port;
@@ -45,7 +56,7 @@ class LibraryEventsControllerIntegrationTest {
     @Autowired
     EmbeddedKafkaBroker embeddedKafkaBroker;
 
-    private Consumer<Integer, String> consumer;
+    private Consumer<Integer, LibraryEventAvro> consumer;
 
     @BeforeEach
     void setUp() {
@@ -53,7 +64,12 @@ class LibraryEventsControllerIntegrationTest {
                 .baseUrl("http://localhost:" + port)
                 .build();
         var configs = new HashMap<>(KafkaTestUtils.consumerProps(embeddedKafkaBroker, "group1", true));
-        consumer = new DefaultKafkaConsumerFactory<>(configs, new IntegerDeserializer(), new StringDeserializer())
+        // DefaultKafkaConsumerFactory configures the deserializer from these props
+        configs.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, REGISTRY);
+        configs.put(KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, true);
+        var avroDeserializer = new KafkaAvroDeserializer();
+        consumer = new DefaultKafkaConsumerFactory<>(configs, new IntegerDeserializer(),
+                (Deserializer<LibraryEventAvro>) (Deserializer<?>) avroDeserializer)
                 .createConsumer();
         embeddedKafkaBroker.consumeFromAllEmbeddedTopics(consumer);
     }
@@ -79,9 +95,7 @@ class LibraryEventsControllerIntegrationTest {
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
 
         var record = KafkaTestUtils.getSingleRecord(consumer, "library-events");
-        assertEquals(
-                "{\"libraryEventId\":null,\"libraryEventType\":\"NEW\",\"book\":{\"bookId\":123,\"bookName\":\"Kafka using Spring Boot\",\"bookAuthor\":\"Dilip\"}}",
-                record.value());
+        assertEquals(avroEvent(null, "NEW", 123), record.value());
     }
 
     @Test
@@ -100,8 +114,16 @@ class LibraryEventsControllerIntegrationTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
 
         var record = KafkaTestUtils.getSingleRecord(consumer, "library-events");
-        assertEquals(
-                "{\"libraryEventId\":123,\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka using Spring Boot\",\"bookAuthor\":\"Dilip\"}}",
-                record.value());
+        assertEquals(avroEvent(123, "UPDATE", 456), record.value());
+    }
+
+    /** The Avro record the consumer should read back (Avro records implement equals()). */
+    private static LibraryEventAvro avroEvent(Integer id, String type, int bookId) {
+        return LibraryEventAvro.newBuilder()
+                .setLibraryEventId(id)
+                .setLibraryEventType(LibraryEventTypeAvro.valueOf(type))
+                .setBook(BookAvro.newBuilder()
+                        .setBookId(bookId).setBookName("Kafka using Spring Boot").setBookAuthor("Dilip").build())
+                .build();
     }
 }

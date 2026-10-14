@@ -11,3 +11,6 @@ target/
 
 # Maven wrapper
 .mvn/wrapper/maven-wrapper.jar
+
+# Logback file appender output (kafka-core apps)
+logs/
