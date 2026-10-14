@@ -28,7 +28,7 @@ This document is a **conceptual deep-dive** — it explains *why* Kafka is shape
 learning-kafka/                       ← root POM (spring-boot-starter-parent)
 ├── kafka-core/                       ← Avro + Schema Registry on a 3-broker KRaft cluster (README: kafka-core/README.md)
 │   ├── schemas/                      ← the event contract: Avro schemas + base event (EventMetadata, BaseEvent)
-│   ├── library-events-producer/      ← REST API → Kafka: library events + coffee orders, VIP partitioner, zstd (port 8080)
+│   ├── library-events-producer/      ← REST API → Kafka: library events, coffee orders, key routing; 2 custom partitioners, zstd (port 8080)
 │   ├── library-events-consumer-a/    ← Kafka → PostgreSQL, transactional + idempotent, retry topics, share group, replay (port 8081)
 │   ├── library-events-consumer-b/    ← same code as a, same groups, KIP-848 group protocol (port 8086)
 │   └── connect/                      ← Kafka Connect JDBC sink → PostgreSQL "events" + reconciliation SQL
@@ -346,6 +346,14 @@ Response `200 OK` with the same shape (`eventType: LibraryEvent.UPDATE`); `400` 
 
 Response `201 Created`: the order's id, name, status, ordered time and its `metadata` (`eventType: CoffeeOrder.PLACED`). VIP customers (`Ada`, `Grace`) go to partition 0 — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression).
 
+### <span style="color:hsl(220,80%,58%)">POST /v1/key-routing — Send a record whose key picks the partition</span>
+
+```json
+{ "key": "order-VIP-1001", "message": "VIP order" }
+```
+
+Response `201 Created`: `{"key": "order-VIP-1001", "matchedSubstring": "VIP", "partition": 0, "offset": 0}`. `KeySubstringPartitioner` sends every key containing a configured substring to one partition (`VIP` → 0, `UK` → 1, `US` → 2); other keys are hashed like Kafka's default — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression).
+
 ---
 
 <a id="observability"></a>
@@ -364,14 +372,14 @@ Prometheus (root compose, `localhost:9091`) scrapes `/actuator/prometheus` of th
 | Row | Panels |
 |---|---|
 | Apps | scrape targets UP/DOWN |
-| Producers | records sent per second; `KafkaTemplate` send time |
+| Producers | records sent per second; `KafkaTemplate` send time; ***compression ratio*** (compressed ÷ raw batch) and bytes sent per second, per producer `client_id` |
 | Consumers | records processed per second ***by result*** (every listener container, incl. retry and DLT); listener processing time; consumer lag; records fetched per second |
 | Kafka Streams | stream threads alive/failed; commit latency |
 | JVM, HTTP and database | HTTP requests per second; heap; Hikari connections in use; process CPU |
 
 Every panel query was checked against live Prometheus data. The dashboard is a JSON file in `docker/grafana/provisioning/dashboards/` (read-only in the UI — edit the file).
 
-Import `insomnia-collection.json` into Insomnia to test all endpoints — library events, coffee orders, replay, Streams queries (incl. windows and the stores join), Schema Registry, Kafka Connect and actuator.
+Import `insomnia-collection.json` into Insomnia to test all endpoints — library events, coffee orders, key routing, replay, Streams queries (incl. windows and the stores join), Schema Registry, Kafka Connect and actuator.
 
 ---
 
@@ -389,9 +397,9 @@ cd kafka-core && mvn test
 | Module | Tests |
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
-| `kafka-core/library-events-producer` | 14 |
+| `kafka-core/library-events-producer` | 31 — incl. both partitioners, key routing end to end, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
 | `kafka-core/library-events-consumer-a` / `-b` | 23 each (b on the KIP-848 protocol) |
-| `kafka-stream/orders-streams-app` | 20 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration |
+| `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
 Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent's in-memory `mock://` Schema Registry. The kafka-core consumer tests need Docker: they run against a real PostgreSQL via Testcontainers, and `LibraryEventsConsumerContainerTest` also uses a real `cp-kafka:8.3.2` broker ([`ConfluentKafkaContainer`][ConfluentKafkaContainer]).
 
@@ -404,8 +412,9 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 
 <ul>
 
-- REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`, `POST /v1/coffee-orders`
-- Custom `CoffeeVipPartitioner` (VIP customers → partition 0) on the coffee template only; `zstd` compression
+- REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`, `POST /v1/coffee-orders`, `POST /v1/key-routing`
+- Custom partitioners, each on its own template: `CoffeeVipPartitioner` (VIP customers → partition 0) and `KeySubstringPartitioner` (keys sharing a substring → one partition)
+- `zstd` compression of every batch before it is sent, with `linger.ms=20` so batches fill
 - Publishes Avro via Confluent [`KafkaAvroSerializer`][KafkaAvroSerializer]; schemas registered automatically to `http://localhost:8085`
 - Kafka producer with async [`CompletableFuture`][CompletableFuture]-based send; idempotent (`acks=all`)
 - Custom headers per record (`event-source: scanner`)

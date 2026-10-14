@@ -202,13 +202,105 @@
       }
     },
     {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Compression ratio (compressed ÷ raw batch size)",
+      "description": "Producer metric compression-rate-avg: average compressed size of a batch as a share of its raw size. Lower is better; above 100% means single-record batches that zstd made bigger.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "avg by (application, client_id) (kafka_producer_compression_rate_avg)",
+          "legendFormat": "{{application}} {{client_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Bytes sent per second (after compression)",
+      "description": "Producer metric outgoing-byte-total: what actually crosses the network to the brokers, compressed batches plus request overhead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (application, client_id) (rate(kafka_producer_outgoing_byte_total[1m]))",
+          "legendFormat": "{{application}} {{client_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "id": 6,
       "type": "row",
       "title": "Consumers",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 22,
         "w": 24,
         "h": 1
       },
@@ -225,7 +317,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 23,
         "w": 12,
         "h": 8
       },
@@ -271,7 +363,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 15,
+        "y": 23,
         "w": 12,
         "h": 8
       },
@@ -317,7 +409,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 31,
         "w": 12,
         "h": 8
       },
@@ -363,7 +455,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 23,
+        "y": 31,
         "w": 12,
         "h": 8
       },
@@ -405,7 +497,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 39,
         "w": 24,
         "h": 1
       },
@@ -422,7 +514,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -477,7 +569,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -519,7 +611,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 40,
+        "y": 48,
         "w": 24,
         "h": 1
       },
@@ -536,7 +628,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -582,7 +674,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 41,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -628,7 +720,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 57,
         "w": 12,
         "h": 8
       },
@@ -674,7 +766,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 49,
+        "y": 57,
         "w": 12,
         "h": 8
       },
@@ -710,5 +802,5 @@
       }
     }
   ],
-  "description": "Producer, consumers (incl. retry/DLT listeners) and Kafka Streams app \u2014 scraped by Prometheus from /actuator/prometheus."
+  "description": "Producer, consumers (incl. retry/DLT listeners) and Kafka Streams app — scraped by Prometheus from /actuator/prometheus."
 }

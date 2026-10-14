@@ -1,6 +1,7 @@
 package com.learnkafkastreams.config;
 
 import com.learnkafkastreams.exceptionhandler.StreamsSerializationExceptionHandler;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
@@ -34,6 +35,14 @@ class OrdersStreamsConfigurationTest {
         assertThat(config.getConfiguredInstance(StreamsConfig.PRODUCTION_EXCEPTION_HANDLER_CLASS_CONFIG,
                 ProductionExceptionHandler.class))
                 .isInstanceOf(StreamsSerializationExceptionHandler.class);
+    }
+
+    @Test
+    @DisplayName("the Streams producer zstd-compresses what it writes")
+    void producerCompressesBatches() {
+        var producerConfigs = new StreamsConfig(props).getProducerConfigs("orders-test-producer");
+
+        assertThat(producerConfigs).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
     }
 
     @Test

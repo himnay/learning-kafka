@@ -276,6 +276,146 @@
       }
     },
     {
+      "_id": "fld_key_routing",
+      "_type": "request_group",
+      "parentId": "wrk_learning_kafka",
+      "name": "Kafka Core — Key routing (producer :8080)",
+      "description": "KeySubstringPartitioner: every key that contains a configured substring lands on one partition. Rules (app.key-routing.substring-partitions): VIP=0 (pinned), UK and US (hashed: UK → 1, US → 2 on 3 partitions). First matching rule wins; matching is case-sensitive. The response shows the partition and offset Kafka acked."
+    },
+    {
+      "_id": "req_route_vip_1",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — key with VIP (→ partition 0)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "Pinned rule VIP=0: any key containing VIP goes to partition 0.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"order-VIP-1001\",\n  \"message\": \"VIP order\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_vip_2",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — VIP anywhere in the key (→ partition 0)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "The substring can sit anywhere in the key.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"member-7-VIP\",\n  \"message\": \"VIP member\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_uk",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — key with UK (→ partition 1)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "Hashed rule UK: murmur2(\"UK\") % 3 = 1, for every key containing UK.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"branch-UK-12\",\n  \"message\": \"UK branch\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_us",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — key with US (→ partition 2)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "Hashed rule US: murmur2(\"US\") % 3 = 2.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"order-US-42\",\n  \"message\": \"US order\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_first_match",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — VIP and US: first rule wins (→ partition 0)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "Rules are checked in configured order (VIP=0, UK, US), so VIP wins.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"US-VIP-9\",\n  \"message\": \"both substrings\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_no_match",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — no substring (→ hash of the whole key)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "No rule matches: Kafka's default murmur2 hash of the whole key; matchedSubstring is null.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"order-12345\",\n  \"message\": \"plain order\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_case",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — lowercase vip does not match",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing",
+      "description": "Matching is case-sensitive: vip is not VIP, so the whole key is hashed.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"order-vip-1\",\n  \"message\": \"lowercase\"\n}"
+      }
+    },
+    {
       "_id": "fld_schema_registry",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",

@@ -26,7 +26,7 @@
 22. 🔄 [Data replication with Kafka Connect, and reconciliation](#22-data-replication-with-kafka-connect-and-reconciliation)
 23. 🔁 [Non-blocking retry topics (`@RetryableTopic`)](#23-non-blocking-retry-topics-retryabletopic)
 24. 🧺 [Share groups: Kafka as a queue](#24-share-groups-kafka-as-a-queue)
-25. 🎯 [Custom partitioner and compression](#25-custom-partitioner-and-compression)
+25. 🎯 [Custom partitioners and compression](#25-custom-partitioner-and-compression)
 26. 🗜️ [Compacted "latest state" topic](#26-compacted-latest-state-topic)
 27. 🆕 [KIP-848 consumer rebalance protocol](#27-kip-848-consumer-rebalance-protocol)
 28. ⏪ [Replaying records with seek](#28-replaying-records-with-seek)
@@ -40,7 +40,7 @@ This module is the core of the repo. Every event is ***Avro, registered in Confl
 
 - ***Library events*** — published by the producer, consumed by ***both consumer apps in one consumer group***, and written to ***PostgreSQL*** (schema managed by ***Flyway***). They use ***Kafka transactions***, an ***idempotent producer***, an ***idempotent consumer***, retries and a ***dead-letter topic***.
 - ***Coffee orders*** — the same producer and consumers (own topic, own consumer group), showing richer Avro: nested records, logical types (`uuid`, `timestamp-millis`, `decimal`) and schema evolution. They also carry the more advanced features: a ***custom (VIP) partitioner***, ***non-blocking retry topics*** and a ***share group*** (Kafka's queue semantics).
-- ***Also covered*** — ***zstd compression***, a ***compacted*** "latest state" topic written in the consumers' Kafka transaction, the ***KIP-848*** consumer rebalance protocol (consumer-b), and ***replay*** by seeking a partition back.
+- ***Also covered*** — a ***key-substring partitioner*** (every key containing a configured substring lands on one partition), ***zstd compression*** of every batch before it is sent, a ***compacted*** "latest state" topic written in the consumers' Kafka transaction, the ***KIP-848*** consumer rebalance protocol (consumer-b), and ***replay*** by seeking a partition back.
 
 Start here for the fundamentals: producer records, partitions with leaders and followers, consumer groups, offsets, schema compatibility, and what "exactly-once" can and cannot mean once a database is involved.
 
@@ -78,7 +78,8 @@ kafka-core/
 ├── docker-compose.yml           3 Kafka brokers + topic init + Schema Registry + PostgreSQL + Kafka Connect + Kafdrop
 ├── connect/                     JDBC sink connector config + reconciliation SQL
 ├── schemas/                     Avro .avsc files → generated Java (library JAR, no Spring Boot)
-├── library-events-producer/     REST API (port 8080) → Avro → "library-events" and "coffee-orders" (VIP partitioner, zstd)
+├── library-events-producer/     REST API (port 8080) → "library-events", "coffee-orders" (Avro, VIP partitioner)
+│                                and "key-routing" (String, key-substring partitioner); zstd-compressed batches
 ├── library-events-consumer-a/   port 8081: library-events → PostgreSQL + compacted "library-book-state",
 │                                coffee-orders → consumer group with retry topics + "coffee-baristas" share group, replay API
 └── library-events-consumer-b/   port 8086: same code as a, same groups — but on the KIP-848 group protocol
@@ -86,15 +87,17 @@ kafka-core/
 
 ```mermaid
 flowchart LR
-    Client([HTTP client]) -->|POST/PUT /v1/libraryevent<br/>POST /v1/coffee-orders| P[library-events-producer<br/>:8080]
+    Client([HTTP client]) -->|POST/PUT /v1/libraryevent<br/>POST /v1/coffee-orders<br/>POST /v1/key-routing| P[library-events-producer<br/>:8080]
     P -.->|register / look up schema| SR[(Schema Registry<br/>:8085)]
     P -->|Avro, idempotent<br/>acks=all| T
     P -->|Avro| CO
+    P -->|String, routed by<br/>key substring| KR
 
     subgraph K[Kafka cluster — 3 brokers, KRaft]
         T[(library-events<br/>P0 · P1 · P2 · RF=3)]
         DLT[(library-events.DLT)]
         CO[(coffee-orders)]
+        KR[(key-routing)]
     end
 
     T -->|P0, P1| A[library-events-consumer-a<br/>:8081]
@@ -375,17 +378,19 @@ Three send methods, each demonstrating a different Spring Kafka [`KafkaTemplate`
 spring.kafka.producer:
   key-serializer: org.apache.kafka.common.serialization.IntegerSerializer
   value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+  compression-type: zstd       # every batch is compressed before it is sent (§25)
   properties:
     acks: all                  # wait for all in-sync replicas to ack
     retries: 10                # retry transient send failures
     retry.backoff.ms: 1000
     enable.idempotence: "true" # producer-side dedup of retried sends
+    linger.ms: 20              # wait up to 20 ms to fill a batch: bigger batches compress better
     schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
 ```
 
 - **`acks=all`** — the leader acks only once every in-sync replica has the record. With `min.insync.replicas=2` at least one follower also has it, so a leader crash right after acking doesn't lose data.
 - **`enable.idempotence=true`** — see [§13](#13-idempotency-producer-and-consumer).
-- **Auto-topic-creation** (`AutoCreateConfig`) declares `library-events` with `3` partitions via [`NewTopic`][NewTopic], so the app also works against a bare broker. With docker compose, `kafka-init` has already created it with RF 3, so this is a no-op there.
+- **Auto-topic-creation** (`AutoCreateConfig`) declares `library-events` and `key-routing` with `3` partitions via [`NewTopic`][NewTopic], so the app also works against a bare broker. With docker compose, `kafka-init` has already created them with RF 3, so this is a no-op there.
 
 ### <span style="color:hsl(165,80%,58%)">`CoffeeOrdersProducer` (also in library-events-producer)</span>
 
@@ -396,9 +401,18 @@ kafkaTemplate.send(TOPIC, order.getId().toString(), order)        // key = order
 ```
 
 - ***Its own `KafkaTemplate`, not a bean.*** Coffee keys are UUID strings, library keys are Integers. `CoffeeOrdersProducer` builds a String-keyed template from Boot's producer factory (`copyWithConfigurationOverride(key.serializer=StringSerializer)`). Declaring a second `KafkaTemplate` ***bean*** would make Boot's auto-configured template (used by `LibraryEventProducer`) back off.
+- ***Its own `client.id`*** — `library-events-producer-coffee-N`. The copied factory is not a Spring bean, so it can't name its producers after `spring.application.name` the way Boot's factory does (`library-events-producer-producer-N`); without a `client.id` they would show up as `producer-N` in metrics.
 - ***REST records in `domain`*** — `CoffeeOrderRequest` and `CoffeeOrderResponse` sit next to the library-event records in `com.learnkafka.domain`.
 
 `POST /v1/coffee-orders` (`CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, a real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the partition on success. It returns a `CoffeeOrderResponse` record rather than the Avro object ([§21](#21-gotchas-avro-112--spring-boot-4)).
+
+### <span style="color:hsl(220,80%,58%)">`KeyRoutingProducer` (also in library-events-producer)</span>
+
+`POST /v1/key-routing` (`KeyRoutingRequest{key, message}`) sends the message as a plain ***String*** record to `key-routing`, keyed by whatever the caller sends, through a template that uses `KeySubstringPartitioner` ([§25](#25-custom-partitioner-and-compression)). It waits for the broker's ack and returns `KeyRoutingResponse{key, matchedSubstring, partition, offset}`, so you can see where each key landed.
+
+- ***Same pattern as coffee*** — its own String/String template built from Boot's producer factory: it inherits `acks`, idempotence, zstd and `linger.ms`, and has its own `client.id` (`library-events-producer-key-routing-N`).
+- ***Rules checked at startup*** — the controller parses `app.key-routing.substring-partitions` itself, so a malformed rule stops the app instead of failing the first send.
+- ***Why a separate topic*** — the other keys can't show substring routing: library events are keyed by an Integer id (`null` for NEW) and coffee orders by a random UUID.
 
 ---
 
@@ -797,14 +811,14 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | Service | Port | Notes |
 |---|---|---|
 | `kafka-1`, `kafka-2`, `kafka-3` | `9092`, `9093`, `9094` | `broker,controller`; RF 3, `min.insync.replicas=2` |
-| `kafka-init` | — | creates `library-events`, `library-events.DLT` and the compacted `library-book-state` (3 × RF 3), prints layout and quorum, then exits |
+| `kafka-init` | — | creates `library-events`, `library-events.DLT`, `key-routing` and the compacted `library-book-state` (3 × RF 3), prints layout and quorum, then exits |
 | `schema-registry` | `8085` | `cp-schema-registry:8.3.2`, schemas stored in `_schemas` |
 | `postgres` | `5435` | `postgres:19beta3`, db/user/password `library` |
 | `kafka-connect` | `8083` | Connect worker; installs the JDBC connector on start |
 | `kafka-connect-init` | — | registers `library-events-jdbc-sink` from `connect/library-events-jdbc-sink.json`, then exits |
 | `kafdrop` | `9001` | `kafdrop:4.3.0`, connected to Schema Registry (container port 9000; host 9000 is often taken by local dev servers) |
 | `prometheus` (root compose) | `9091` | `prometheus:v3.15.0`; scrapes the apps on the host via `host.docker.internal` (`extra_hosts: host-gateway` for plain Linux Docker) |
-| `grafana` (root compose) | `3001` | `grafana:13.2.3`, admin/admin; provisioned Prometheus datasource + the ***Learning Kafka*** dashboard (producer send rate, listener throughput/latency by result incl. retry/DLT containers, consumer lag, Streams threads/commit latency, HTTP, heap, Hikari, CPU) |
+| `grafana` (root compose) | `3001` | `grafana:13.2.3`, admin/admin; provisioned Prometheus datasource + the ***Learning Kafka*** dashboard (producer send rate and compression ratio, listener throughput/latency by result incl. retry/DLT containers, consumer lag, Streams threads/commit latency, HTTP, heap, Hikari, CPU) |
 
 ---
 
@@ -1068,9 +1082,18 @@ The members' assignments ***overlap*** (partition 2 was given to two barista con
 ---
 
 <a id="25-custom-partitioner-and-compression"></a>
-## <span style="color:hsl(54,80%,58%)">25. 🎯 Custom partitioner and compression</span>
+## <span style="color:hsl(54,80%,58%)">25. 🎯 Custom partitioners and compression</span>
 
-***`CoffeeVipPartitioner`*** (producer app) gives VIP customers partition 0 to themselves and hashes everyone else (murmur2, like Kafka's default) over partitions 1..N-1:
+The producer app has two custom partitioners. Each is plugged into ***one template only*** (`partitioner.class` is a config override when that template is built). Library events keep Kafka's built-in partitioner, including ***sticky partitioning*** for their null keys, which any custom partitioner would turn off.
+
+| Partitioner | Topic | Decides by | Guarantee |
+|---|---|---|---|
+| `CoffeeVipPartitioner` | `coffee-orders` | the ***value*** (customer name) | VIP orders get partition 0 ***to themselves*** |
+| `KeySubstringPartitioner` | `key-routing` | a ***substring of the key*** | every key containing the substring lands on ***one*** partition |
+
+### <span style="color:hsl(96,80%,50%)">`CoffeeVipPartitioner`: reserve a partition</span>
+
+It gives VIP customers partition 0 to themselves and hashes everyone else (murmur2, like Kafka's default) over partitions 1..N-1:
 
 ```java
 if (value instanceof CoffeeOrder order && vipCustomers.contains(order.getName().toString())) {
@@ -1079,11 +1102,98 @@ if (value instanceof CoffeeOrder order && vipCustomers.contains(order.getName().
 return 1 + Utils.toPositive(Utils.murmur2(keyBytes)) % (numPartitions - 1);
 ```
 
-- ***Configured per template*** — only the coffee template uses it (`partitioner.class` via `copyWithConfigurationOverride`), with `app.coffee.vip-customers: Ada,Grace` passed in as the producer property `coffee.vip.customers`. Library events keep Kafka's built-in partitioner, including ***sticky partitioning*** for their null keys, which any custom partitioner would turn off.
+- ***Configured on the coffee template*** (`copyWithConfigurationOverride`), with `app.coffee.vip-customers: Ada,Grace` passed in as the producer property `coffee.vip.customers`.
 - ***Real run*** — `Ada → P0`, `Ada → P0`, `Grace → P0`; `Linus → P2`, `Ken → P1`, `Margaret → P1`, `Barbara → P2`.
 - ***Risk*** — a hot VIP partition caps VIP throughput at one consumer.
 
-***Compression*** — `spring.kafka.producer.compression-type: zstd` in all three apps. The producer compresses whole ***batches***; the broker stores them as-is (topic `compression.type=producer`, the default) and consumers decompress. `kafka-dump-log` on `coffee-orders` showed `compresscodec: zstd` for new batches (older ones: `none`). Avro is already compact, so the gain grows with batch size (`linger.ms`, `batch.size`).
+### <span style="color:hsl(220,80%,58%)">`KeySubstringPartitioner`: keys that share a substring share a partition</span>
+
+Kafka's default hashes the ***whole*** key, so `order-VIP-1` and `order-VIP-2` can land on different partitions. `KeySubstringPartitioner` looks for configured substrings first:
+
+```java
+if (key != null) {
+    var rule = matchingRule(rules, key.toString());              // first rule whose substring the key contains
+    if (rule.isPresent()) {
+        return rule.get().partitionFor(topic, numPartitions);    // pinned number, or murmur2(substring) % n
+    }
+}
+if (keyBytes == null) {
+    return ThreadLocalRandom.current().nextInt(numPartitions);   // no key
+}
+return Utils.toPositive(Utils.murmur2(keyBytes)) % numPartitions;   // no match: Kafka's default
+```
+
+- ***Rules*** — `app.key-routing.substring-partitions: VIP=0,UK,US`, passed to the partitioner as the producer property `key.substring.partitions`:
+  - `VIP=0` — ***pinned***: every key containing `VIP` goes to partition 0.
+  - `UK`, `US` — ***hashed***: Kafka's murmur2 hash of the ***substring*** instead of the whole key, so every key containing it gets the same partition. On 3 partitions `UK` → 1 and `US` → 2. You don't pick the number, and adding partitions moves it, as with any key hash; pinned rules stay put.
+- ***First match wins***, in configured order: `US-VIP-9` goes to 0. Matching is ***case-sensitive***: `vip` is not `VIP`.
+- ***Why*** — Kafka orders records only ***within a partition***. Related records with distinct keys (`order-VIP-1001`, `member-7-VIP`) land on one partition, so one consumer of a group reads all of them, in order.
+- ***Pinning doesn't reserve*** — unmatched keys can still hash onto partition 0 (`CoffeeVipPartitioner` shows how to reserve one). A busy substring also caps its throughput at one consumer.
+- ***Mistakes fail loudly*** — a malformed rule (`VIP=x`, `=1`, `VIP=-1`) stops the app at startup with a `ConfigException`. A pinned partition the topic doesn't have (`VIP=5` on 3 partitions) fails the send with `Rule VIP=5 needs partition 5, but topic key-routing has 3 partitions`. Kafka doesn't check this itself: the record would wait for a partition that never appears, then time out after `delivery.timeout.ms` (2 minutes).
+- ***Keyless records*** get a random partition: a custom partitioner can't hand them back to Kafka's sticky logic (returning `-1` is an error).
+
+Try it with the Insomnia folder ***Kafka Core — Key routing***: `POST /v1/key-routing` with `{"key": "...", "message": "..."}`. Real run on the 3-broker cluster:
+
+| Key | `matchedSubstring` | Partition |
+|---|---|---|
+| `order-VIP-1001` | `VIP` | 0 |
+| `member-7-VIP` | `VIP` | 0 |
+| `US-VIP-9` | `VIP` (first rule) | 0 |
+| `branch-UK-12` | `UK` | 1 |
+| `UK-branch-3` | `UK` | 1 |
+| `order-US-42` | `US` | 2 |
+| `order-12345` | `null`: whole key hashed | 1 |
+| `order-vip-1` | `null`: case-sensitive | 2 |
+
+The topic agrees:
+
+```bash
+docker exec kafka-core-kafka-1 kafka-console-consumer --bootstrap-server kafka-1:29092 --topic key-routing \
+  --from-beginning --formatter-property print.partition=true --formatter-property print.key=true --timeout-ms 5000
+# Partition:0	order-VIP-1001	hi order-VIP-1001
+# Partition:0	member-7-VIP	hi member-7-VIP
+# Partition:0	US-VIP-9	hi US-VIP-9
+# Partition:1	branch-UK-12	hi branch-UK-12
+# Partition:1	UK-branch-3	hi UK-branch-3
+# Partition:1	order-12345	hi order-12345
+# Partition:2	order-US-42	hi order-US-42
+# Partition:2	order-vip-1	hi order-vip-1
+```
+
+### <span style="color:hsl(160,80%,45%)">Compression: in the producer, before the send</span>
+
+Every producer in the repo compresses with ***zstd***: the three kafka-core apps (`spring.kafka.producer.compression-type: zstd`) and the Kafka Streams app ([kafka-stream §10](../kafka-stream/README.md#10-configuration)). The Kafka client does it before any byte leaves the app:
+
+```mermaid
+flowchart LR
+    S["send()"] --> SE["serialize<br/>(Avro / String)"] --> PA[partitioner] --> B["batch for<br/>that partition"]
+    B -->|"batch.size full<br/>or linger.ms up"| Z["zstd-compress<br/>the whole batch"] --> BR[("broker<br/>stores it as-is")] --> C["consumer<br/>decompresses"]
+```
+
+- ***The batch is the unit*** — records collect in one batch per partition, and the batch is compressed as ***one block***. What repeats from record to record (schema id, event type, source, book name) compresses away. A batch of one record has nothing to share.
+- ***The broker doesn't recompress*** — topic `compression.type=producer` (the default) keeps the producer's codec, so batches go to disk and to consumers exactly as sent. A topic set to a different codec would make the broker decompress and recompress every batch.
+- ***Consumers decompress transparently*** — the codec is in the batch header; consumers need no setting.
+- ***Why not compress the payload in our own code?*** — the bytes must stay plain Avro (magic byte + schema id + data) for the consumers, Kafka Connect and Kafdrop, and one 125-byte record barely compresses on its own. Batch compression is where the gain is.
+
+| Setting | Value | Why |
+|---|---|---|
+| `compression-type` | `zstd` | best ratio of the four codecs (`gzip`, `snappy`, `lz4`, `zstd`); `lz4` is the low-CPU alternative |
+| `linger.ms` | `20` in the producer app (Kafka 4 default: `5`) | wait up to 20 ms for more records: bigger batches, better ratio, at most 20 ms more latency |
+| `batch.size` | `16384` (default) | upper bound of one batch, per partition |
+| `compression.zstd.level` | `3` (default) | KIP-390 (Kafka 3.8+): higher is smaller and slower |
+
+***Measured*** on the 3-broker cluster with 200 concurrent `POST /v1/libraryevent` calls, read with `kafka-dump-log` on `library-events-0`. Each record's Avro value is 125 bytes, about 155 bytes in a batch with its header and length fields, plus 61 bytes per batch header:
+
+| Batch | Records | Raw (computed) | zstd, on disk |
+|---|---|---|---|
+| sent on its own | 1 | ~216 B | 215 B: nothing saved |
+| from the burst | 20 | ~3,160 B | 767 B (24%) |
+| from the burst | 30 | ~4,710 B | 1,120 B (24%) |
+
+- ***Producer metric*** `compression-rate-avg` (compressed batch ÷ raw batch) during that run: ***0.26*** for library events. Key-routing sends one record at a time, and there zstd made the batches ***bigger*** (1.25). The consumer apps' transactional producers write one record per transaction, so they sit around ***1.2***: compression pays off only once records share a batch.
+- ***Watch it*** — Grafana ***Learning Kafka*** → ***Producers*** → ***Compression ratio*** and ***Bytes sent per second***, per `client_id`. Or ask the app: `/actuator/metrics/kafka.producer.compression.rate.avg?tag=client.id:library-events-producer-producer-1`.
+- ***On disk*** — `kafka-dump-log` prints `count:` and `compresscodec:` for each batch ([§29](#29-kafka-cli-cheat-sheet)).
+- ***Tested*** — `CompressionIntegrationTest` sends 500 events in one burst and gets `compression-rate-avg` ≈ ***0.22*** (asserted below 0.5); all 500 come back intact.
 
 ---
 
@@ -1173,6 +1283,7 @@ B="--bootstrap-server kafka-1:29092"
 | Produce with key (`key:value` per line) | `$K kafka-console-producer $B --topic test-topic --reader-property parse.key=true --reader-property key.separator=:` |
 | Consume from the start | `$K kafka-console-consumer $B --topic test-topic --from-beginning` |
 | Consume and print keys | `... --formatter-property print.key=true --formatter-property "key.separator= - "` |
+| Consume and print partitions | `... --formatter-property print.partition=true` |
 | Consume as part of a group | `... --group my-group` |
 | List consumer groups | `$K kafka-consumer-groups $B --list` |
 | Group offsets, lag and owners | `$K kafka-consumer-groups $B --describe --group library-events-listener-group` |
@@ -1183,7 +1294,7 @@ B="--bootstrap-server kafka-1:29092"
 
 - ***Keys and partitions*** — the console producer hashes the key exactly like the Java client, so lines with the same key land on the same partition.
 - ***Console flags were renamed in Kafka 4*** — `--property` still works with a deprecation warning; the new names are `--reader-property` (producer) and `--formatter-property` (consumer).
-- ***Segment files*** exist on every replica, not only the leader — `kafka-dump-log` works on any broker that hosts the partition. It shows batch headers (base offset, producer id, sequence, `isTransactional`) and each record's key and payload.
+- ***Segment files*** exist on every replica, not only the leader — `kafka-dump-log` works on any broker that hosts the partition. It shows batch headers (base offset, record `count`, `compresscodec`, producer id, sequence, `isTransactional`) and each record's key and payload.
 - ***Extra brokers*** — there is nothing to set up by hand any more: the compose file already runs 3 brokers. Each needs its own `KAFKA_NODE_ID`, listener ports and data volume ([§3](#3-the-kafka-cluster-3-brokers-kraft)).
 
 ---
@@ -1273,7 +1384,7 @@ No Schema Registry container is needed: tests point `schema.registry.url` at ***
 | Module | Tests | What they cover |
 |---|---|---|
 | `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
-| `library-events-producer` | 14 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; controller and producer unit tests; `CoffeeOrdersProducerTest` (201 + Avro order keyed by its id, 400 on a blank name) |
+| `library-events-producer` | 31 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersProducerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key) |
 | `library-events-consumer-a` / `-b` | 23 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
@@ -1285,7 +1396,7 @@ Library consumer tests (identical in a and b):
 - ***Test sends use `executeInTransaction`*** because the `KafkaTemplate` is transactional. The embedded broker sets `transaction.state.log.replication.factor=1` and `min.isr=1`, since it is a single node.
 
 ```bash
-cd kafka-core && mvn -T 4 clean install         # all four modules (65 tests)
+cd kafka-core && mvn -T 4 clean install         # all four modules (82 tests)
 ```
 
 <!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->

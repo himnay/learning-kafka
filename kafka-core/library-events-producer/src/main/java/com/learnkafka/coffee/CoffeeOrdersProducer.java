@@ -57,8 +57,9 @@ public class CoffeeOrdersProducer {
     @Autowired
     public CoffeeOrdersProducer(ProducerFactory<?, ?> producerFactory,
                                 @Value("${app.coffee.vip-customers:}") String vipCustomers,
+                                @Value("${spring.application.name}") String applicationName,
                                 EventMetadataFactory eventMetadataFactory) {
-        this(coffeeTemplate(producerFactory, vipCustomers), eventMetadataFactory);
+        this(coffeeTemplate(producerFactory, vipCustomers, applicationName + "-coffee"), eventMetadataFactory);
     }
 
     /** For tests: inject the template directly. */
@@ -71,10 +72,14 @@ public class CoffeeOrdersProducer {
      * Boot's producer settings, plus: String keys, and the VIP partitioner (only for coffee orders).
      * The VIP names reach the partitioner's configure() as a producer property. Passing the
      * overrides to KafkaTemplate makes it own the copied producer factory, so destroy() closes it.
+     * The copy is not a Spring bean, so it can't name its producers "<app>-producer-N" from
+     * spring.application.name like Boot's factory does: without a client.id they'd be "producer-N".
      */
     @SuppressWarnings("unchecked")
-    private static KafkaTemplate<String, CoffeeOrder> coffeeTemplate(ProducerFactory<?, ?> producerFactory, String vipCustomers) {
+    private static KafkaTemplate<String, CoffeeOrder> coffeeTemplate(ProducerFactory<?, ?> producerFactory,
+                                                                     String vipCustomers, String clientId) {
         return new KafkaTemplate<>((ProducerFactory<String, CoffeeOrder>) producerFactory, false, Map.of(
+                ProducerConfig.CLIENT_ID_CONFIG, clientId,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.PARTITIONER_CLASS_CONFIG, CoffeeVipPartitioner.class,
                 CoffeeVipPartitioner.VIP_CUSTOMERS_CONFIG, vipCustomers));

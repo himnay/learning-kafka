@@ -5,6 +5,7 @@ import com.learnkafkastreams.exceptionhandler.StreamsSerializationExceptionHandl
 import com.learnkafkastreams.topology.OrdersTopology;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsConfig;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,6 +54,9 @@ public class OrdersStreamsConfiguration {
             // where RocksDB keeps the state stores (default: <java.io.tmpdir>/kafka-streams)
             props.put(StreamsConfig.STATE_DIR_CONFIG, stateDir);
         }
+        // Compress everything Streams writes (output, changelog and repartition topics) in its producer,
+        // before sending, like the kafka-core apps. Streams already lingers 100 ms, so batches are big.
+        props.put(StreamsConfig.producerPrefix(ProducerConfig.COMPRESSION_TYPE_CONFIG), "zstd");
         props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,

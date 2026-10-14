@@ -19,7 +19,8 @@ public class ProducerUtil {
     private static final KafkaProducer<String, String> PRODUCER = new KafkaProducer<>(Map.of(
             ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS,
             ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName(),
-            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName()
+            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName(),
+            ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd"
     ));
 
     static {

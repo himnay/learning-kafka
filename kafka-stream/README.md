@@ -233,7 +233,8 @@ One default `application.yml`, no profiles:
 | `spring.kafka.streams.state-dir` | unset (→ `<tmp>/kafka-streams`) | where RocksDB keeps the stores |
 | `server.port` | `8082` | REST API + Actuator |
 
-- ***`OrdersStreamsConfiguration` owns the Streams config.*** Its `KafkaStreamsConfiguration` bean replaces Boot's, so `spring.kafka.streams.properties.*` never reaches Kafka Streams — serdes (`String` defaults; records use `JacksonJsonSerde`), the exception handlers, `commit.interval.ms=1000` (§7) and `state.dir` are all set in that bean.
+- ***`OrdersStreamsConfiguration` owns the Streams config.*** Its `KafkaStreamsConfiguration` bean replaces Boot's, so `spring.kafka.streams.properties.*` never reaches Kafka Streams — serdes (`String` defaults; records use `JacksonJsonSerde`), the exception handlers, `commit.interval.ms=1000` (§7), producer compression and `state.dir` are all set in that bean.
+- ***zstd compression*** — `producer.compression.type=zstd` (`StreamsConfig.producerPrefix`) compresses everything Streams writes: repartition, changelog and output topics. Each batch is compressed in the producer, before it is sent; Streams' producer already lingers 100 ms, so batches fill. Checked with `kafka-dump-log`: new `general_orders_count` changelog and repartition batches are `compresscodec: zstd` (older ones `none`). How batch compression works: [kafka-core §25](../kafka-core/README.md#25-custom-partitioner-and-compression).
 - ***Topics*** — `orders` and `stores` are declared as `NewTopic` beans with 2 partitions and the ***broker's default replication factor*** (3 on the kafka-core cluster). Internal repartition and changelog topics are created by Kafka Streams.
 - ***Logging*** — `logback-spring.xml`: console + `logs/orders-kafka-streams.log` (daily/10 MB rolling, 7 days); `com.learnkafkastreams` at `DEBUG`, Kafka's config dumps at `WARN`.
 
@@ -278,13 +279,13 @@ The repo's [`insomnia-collection.json`](../insomnia-collection.json) has all of 
 ## <span style="color:hsl(165,80%,58%)">12. 🧪 Tests</span>
 
 ```bash
-mvn test -pl kafka-stream/orders-streams-app        # 20 tests, no Docker
+mvn test -pl kafka-stream/orders-streams-app        # 21 tests, no Docker
 ```
 
 - ***`OrdersTopologyTest`*** (9) — [`TopologyTestDriver`][TopologyTestDriver], no broker, no Spring: counts and revenue per type and store; accumulation across orders for the same store (`count()`/`aggregate()`, not last-value-wins); ***windowed count*** (orders at `:01` and `:29` share a window, `:31` starts the next); ***windowed revenue***; ***window retention*** (a window is still there after 30 minutes of stream time — the 40 s default would have dropped it); ***the join*** (a store with a `stores` record gets a joined row with its city, one without gets none).
 - ***`OrdersControllerTest`*** (7) — MockMvc against a mocked `OrderStoreService`: routing, `404` for an unknown store, `400` problem detail for an unknown type, ***`503`*** for `InvalidStateStoreException`, `from_time`/`to_time` binding, `400` for a bad date-time.
 - ***`OrdersTopologyIntegrationTest`*** (2) — [`@EmbeddedKafka`][EmbeddedKafka] and the real Spring-managed [`StreamsBuilderFactoryBean`][StreamsBuilderFactoryBean]: counts and revenue, and ***windows and the join queried through `OrderStoreService`***. Each test context gets its own `state.dir`, because every context (`@DirtiesContext`) also gets a new embedded broker.
-- ***`OrdersStreamsConfigurationTest`*** (2) — the exception handlers are registered; a serialization failure is skipped, not fatal.
+- ***`OrdersStreamsConfigurationTest`*** (3) — the exception handlers are registered; the Streams producer resolves `compression.type=zstd`; a serialization failure is skipped, not fatal.
 
 <!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
 

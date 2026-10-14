@@ -11,14 +11,19 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.IntegerSerializer
       value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
-      # Compress whole batches on the producer. The broker stores them as-is (topic
-      # compression.type=producer) and consumers decompress — less network and disk.
+      # Compression happens here, before anything is sent: records collect in a per-partition
+      # batch, the batch is zstd-compressed as one block, and that block crosses the network, is
+      # stored as-is by the broker (topic compression.type=producer) and is decompressed by the
+      # consumer. Applies to every template built from this factory (library, coffee, key-routing).
       compression-type: zstd
       properties:
         acks: all
         retries: 10
         retry.backoff.ms: 1000
         enable.idempotence: "true"
+        # One compressed block per batch, so bigger batches compress better. Wait up to 20 ms
+        # (Kafka 4 default: 5) for more records to join; batch.size (16 KB) still caps a batch.
+        linger.ms: 20
         # Confluent Schema Registry (kafka-core docker compose). The serializer registers each
         # schema on first send: subjects "library-events-value" and "coffee-orders-value".
         schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
@@ -27,6 +32,10 @@ app:
   coffee:
     # CoffeeVipPartitioner sends these customers' orders to partition 0
     vip-customers: Ada,Grace
+  key-routing:
+    # KeySubstringPartitioner: every key containing one of these substrings goes to one partition.
+    # "VIP=0" pins VIP to partition 0; a bare substring is hashed (murmur2): UK → 1, US → 2 on 3 partitions.
+    substring-partitions: VIP=0,UK,US
 
 server:
   port: 8080
