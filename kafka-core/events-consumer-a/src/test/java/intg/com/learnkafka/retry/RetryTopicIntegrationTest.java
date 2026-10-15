@@ -35,7 +35,12 @@ import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -72,7 +77,9 @@ import static org.mockito.Mockito.verify;
         "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.properties.schema.registry.url=" + AvroEvents.REGISTRY,
-        "app.retry.interval=1h"
+        "app.retry.interval=1h",
+        // fail fast while the database is "down" (realDatabaseOutage_...): 3 attempts × 2 s, not × 30 s
+        "spring.datasource.hikari.connection-timeout=2000"
 })
 class RetryTopicIntegrationTest {
 
@@ -94,6 +101,9 @@ class RetryTopicIntegrationTest {
 
     @Autowired
     LibraryEventsRepository libraryEventsRepository;
+
+    @Autowired
+    PostgreSQLContainer postgres;
 
     @MockitoSpyBean
     LibraryEventsService serviceSpy;
@@ -215,6 +225,46 @@ class RetryTopicIntegrationTest {
         awaitRecord(RETRY_TOPIC, r -> isEvent(event, RETRY_TOPIC, r) && headerValues(r, RetryRouter.ATTEMPT_HEADER).equals(List.of("2")));
     }
 
+    @Test
+    @DisplayName("A real database outage (no connections at all) sends the record to the retry topic; once the database is back a drain run saves it")
+    void realDatabaseOutage_goesToRetryTopic_andIsDrainedOnceTheDatabaseIsBack() throws Exception {
+        var event = newEvent(9105, "Retry-Db-Down");
+        blockDatabase();
+        try {
+            kafkaTemplate.executeInTransaction(t -> t.sendDefault(9105, event));
+            awaitRecord(RETRY_TOPIC, r -> isEvent(event, RETRY_TOPIC, r)
+                    && headerValues(r, RetryRouter.ATTEMPT_HEADER).equals(List.of("1")), Duration.ofSeconds(45));
+        } finally {
+            unblockDatabase();
+        }
+
+        drainer.drainOnce();
+
+        assertThat(libraryEventsRepository.findAll())
+                .anySatisfy(saved -> assertThat(saved.getBook().getBookName()).isEqualTo("Retry-Db-Down"));
+    }
+
+    /** What a PostgreSQL outage looks like to the app: existing connections die, new ones are refused. */
+    private void blockDatabase() throws SQLException {
+        try (Connection admin = adminConnection(); Statement statement = admin.createStatement()) {
+            statement.execute("ALTER DATABASE \"" + postgres.getDatabaseName() + "\" ALLOW_CONNECTIONS false");
+            statement.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '"
+                    + postgres.getDatabaseName() + "' AND pid <> pg_backend_pid()");
+        }
+    }
+
+    private void unblockDatabase() throws SQLException {
+        try (Connection admin = adminConnection(); Statement statement = admin.createStatement()) {
+            statement.execute("ALTER DATABASE \"" + postgres.getDatabaseName() + "\" ALLOW_CONNECTIONS true");
+        }
+    }
+
+    /** A connection to the maintenance database, so the app's database can be closed and reopened. */
+    private Connection adminConnection() throws SQLException {
+        var url = "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getMappedPort(5432) + "/postgres";
+        return DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+    }
+
     private long callsFor(String bookName) {
         var matcher = isBook(bookName);
         return mockingDetails(serviceSpy).getInvocations().stream()
@@ -255,10 +305,15 @@ class RetryTopicIntegrationTest {
 
     /** Reads the topic from the beginning until a record matches (15 s at most). */
     private ConsumerRecord<byte[], byte[]> awaitRecord(String topic, Predicate<ConsumerRecord<byte[], byte[]>> matches) {
+        return awaitRecord(topic, matches, Duration.ofSeconds(15));
+    }
+
+    private ConsumerRecord<byte[], byte[]> awaitRecord(String topic, Predicate<ConsumerRecord<byte[], byte[]>> matches,
+                                                       Duration timeout) {
         try (Consumer<byte[], byte[]> reader = newReader()) {
             reader.subscribe(List.of(topic));
             var found = new AtomicReference<ConsumerRecord<byte[], byte[]>>();
-            Awaitility.await().atMost(Duration.ofSeconds(15)).until(() -> {
+            Awaitility.await().atMost(timeout).until(() -> {
                 for (ConsumerRecord<byte[], byte[]> r : reader.poll(Duration.ofMillis(500))) {
                     if (found.get() == null && matchesSafely(matches, r)) {
                         found.set(r);

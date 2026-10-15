@@ -47,6 +47,10 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5435}/${POSTGRES_DB:library}
     username: ${POSTGRES_USER:library}
     password: ${POSTGRES_PASSWORD:library}
+    hikari:
+      # fail fast while PostgreSQL is down (default 30 s): 3 attempts take seconds, then the record
+      # moves on to the retry topic instead of stalling the listener past max.poll.interval.ms
+      connection-timeout: 5000
   jpa:
     open-in-view: false
     hibernate:

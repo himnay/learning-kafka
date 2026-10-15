@@ -14,7 +14,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.hibernate.exception.JDBCConnectionException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.dao.RecoverableDataAccessException;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.transaction.CannotCreateTransactionException;
+
+import java.sql.SQLTransientConnectionException;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.ListenerExecutionFailedException;
 import org.springframework.kafka.support.SendResult;
@@ -108,6 +115,38 @@ class RetryRouterTest {
                 new RuntimeException(new RecoverableDataAccessException("db down")));
 
         assertThat(router.route(record(MAIN, null), wrapped)).isEqualTo(Route.RETRY);
+    }
+
+    @Test
+    @DisplayName("PostgreSQL down while the JPA transaction starts (Hikari times out) is recoverable")
+    void databaseDownWhenTheTransactionStarts_isRecoverable() {
+        var outage = new CannotCreateTransactionException("Could not open JPA EntityManager for transaction",
+                new JDBCConnectionException("Unable to acquire JDBC Connection",
+                        new SQLTransientConnectionException("HikariPool-1 - Connection is not available, request timed out after 2000ms")));
+
+        assertThat(router.route(record(MAIN, null), outage)).isEqualTo(Route.RETRY);
+    }
+
+    @Test
+    @DisplayName("No connection from the pool for a plain JDBC call is recoverable")
+    void noConnectionFromThePool_isRecoverable() {
+        var outage = new CannotGetJdbcConnectionException("Failed to obtain JDBC Connection",
+                new SQLTransientConnectionException("HikariPool-1 - Connection is not available"));
+
+        assertThat(router.route(record(MAIN, null), outage)).isEqualTo(Route.RETRY);
+    }
+
+    @Test
+    @DisplayName("A transient data access failure (e.g. a query timeout) is recoverable")
+    void transientDataAccessFailure_isRecoverable() {
+        assertThat(router.route(record(MAIN, null), new QueryTimeoutException("statement timeout"))).isEqualTo(Route.RETRY);
+    }
+
+    @Test
+    @DisplayName("A constraint violation is not recoverable: retrying can never succeed")
+    void constraintViolation_isNotRecoverable() {
+        assertThat(router.route(record(MAIN, null), new DataIntegrityViolationException("duplicate key")))
+                .isEqualTo(Route.DLT);
     }
 
     @Test

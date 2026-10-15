@@ -6,11 +6,18 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.RecoverableDataAccessException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.ConsumerAwareRecordRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer.SingleRecordHeader;
+import org.springframework.transaction.CannotCreateTransactionException;
+
+import java.sql.SQLRecoverableException;
+import java.sql.SQLTransientException;
+import java.util.List;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -31,6 +38,15 @@ public class RetryRouter implements ConsumerAwareRecordRecoverer {
 
     public enum Route { RETRY, DLT }
 
+    /** Failures worth retrying later: the database unreachable or briefly overloaded. */
+    private static final List<Class<? extends Throwable>> RECOVERABLE = List.of(
+            RecoverableDataAccessException.class,
+            TransientDataAccessException.class,          // query timeout, lock contention
+            DataAccessResourceFailureException.class,    // incl. CannotGetJdbcConnectionException
+            CannotCreateTransactionException.class,      // JPA / JDBC transaction could not start
+            SQLTransientException.class,                 // incl. Hikari's SQLTransientConnectionException
+            SQLRecoverableException.class);
+
     private final RetryProperties properties;
     private final DeadLetterPublishingRecoverer retryRecoverer;
     private final DeadLetterPublishingRecoverer dltRecoverer;
@@ -46,6 +62,9 @@ public class RetryRouter implements ConsumerAwareRecordRecoverer {
         this.retryRecoverer.setHeadersFunction((record, ex) -> new RecordHeaders(new Header[]{
                 new SingleRecordHeader(ATTEMPT_HEADER, String.valueOf(nextAttempt(record)).getBytes(UTF_8))}));
         this.retryRecoverer.setAppendOriginalHeaders(false);   // keep the library-events position, not the retry topic's
+        // the drainer forwards retry-topic records to the retry topic itself: never skip that publish
+        // (by default a same-topic send is silently skipped for "fatal" causes, and the offset would still commit)
+        this.retryRecoverer.setSkipSameTopicFatalExceptions(false);
         this.dltRecoverer = new DeadLetterPublishingRecoverer(template, (record, ex) -> {
             log.error("Routing to DLT: key={} cause={}", record.key(), ex.getMessage());
             return new TopicPartition(dltTopic, record.partition());
@@ -74,11 +93,19 @@ public class RetryRouter implements ConsumerAwareRecordRecoverer {
         return properties.topic().equals(record.topic()) ? attemptOf(record) + 1 : 1;
     }
 
-    /** RecoverableDataAccessException anywhere in the cause chain (listener exceptions arrive wrapped). */
+    /**
+     * True if any exception in the cause chain says "try again later" (listener exceptions arrive
+     * wrapped). A real PostgreSQL outage never surfaces as RecoverableDataAccessException: the JPA
+     * transaction fails to start (CannotCreateTransactionException), a plain JDBC call gets no connection
+     * (CannotGetJdbcConnectionException, a DataAccessResourceFailureException), and underneath sits
+     * Hikari's SQLTransientConnectionException.
+     */
     public static boolean isRecoverable(Throwable ex) {
         for (Throwable t = ex; t != null; t = t.getCause() == t ? null : t.getCause()) {
-            if (t instanceof RecoverableDataAccessException) {
-                return true;
+            for (Class<? extends Throwable> type : RECOVERABLE) {
+                if (type.isInstance(t)) {
+                    return true;
+                }
             }
         }
         return false;
