@@ -34,7 +34,7 @@ import java.util.concurrent.TimeoutException;
  * (app.key-routing.substring-partitions) lands on the same partition. The response says which one.
  * POST /partitions/{partition} skips the partitioner and sends to the partition the caller names.
  *
- * Like CoffeeOrdersProducer, it builds its own String/String KafkaTemplate from Boot's producer
+ * It builds its own String/String KafkaTemplate from Boot's producer
  * factory: a second KafkaTemplate bean would make Boot's auto-configured one back off. Everything
  * else (acks, idempotence, zstd compression, linger.ms) is inherited from that factory.
  */

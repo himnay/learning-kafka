@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *       instead of the whole key: fixed, but you don't choose the number</li>
  * </ul>
  * Pinning doesn't reserve the partition: unmatched keys can still hash onto it
- * (CoffeeVipPartitioner shows how to reserve one).
+ * (the coffee orders' VipPartitionRule shows how to reserve one).
  *
  * Plugged in only for the key-routing template (KeyRoutingProducer).
  */

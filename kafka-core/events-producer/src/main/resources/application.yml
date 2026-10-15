@@ -39,7 +39,7 @@ spring:
 
 app:
   coffee:
-    # CoffeeVipPartitioner sends these customers' orders to partition 0
+    # VipPartitionRule puts these customers' orders on partition 0 (stored in outbox_event.partition_no)
     vip-customers: Ada,Grace
     # coffee-orders partition count: the VIP rule hashes everyone else over partitions 1..N-1
     partitions: 3
