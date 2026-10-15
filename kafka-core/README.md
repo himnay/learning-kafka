@@ -232,6 +232,7 @@ Every event — library events and coffee orders, on the producer and on the con
 
 - ***Optional on purpose*** — with `null` as default, the new schemas stay ***BACKWARD-compatible*** with every event already on the topics. Schema Registry accepted them as `library-events-value` ***v3*** and `coffee-orders-value` ***v2***; old events simply read `metadata = null`.
 - ***Defined once*** — `EventMetadata.avsc` is compiled first (`<imports>` in `schemas/pom.xml`) and referenced by full name from `LibraryEvent.avsc` and `CoffeeOrder.avsc`, even though `CoffeeOrder` lives in another namespace.
+- ***But every generated class `extends SpecificRecordBase`?*** — that is Avro's own runtime base class, the same for every generated record (`Address`, `LibraryEventAvro`, `EventMetadataAvro` …). It has ***no fields***, only plumbing: get/put by field name, schema-based `equals`/`hashCode`/`compareTo`, JSON `toString`, Java serialization and fast custom encode/decode. It is not schema inheritance: the code generator always picks this parent, and a schema has no `extends` to name another record as its parent — so shared fields still have to be embedded. It is also why `EventMetadata.of(Object)` can read `metadata` from any event: `SpecificRecordBase` implements `GenericRecord`.
 
 ***In Java: a base interface and child events.*** The shared contract module (`schemas`) holds the Java side, so producer and consumers use the same types:
 
