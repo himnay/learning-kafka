@@ -31,7 +31,7 @@ learning-kafka/                       ← root POM (spring-boot-starter-parent)
 │   ├── events-producer/              ← REST API → Kafka: library events, coffee orders, key routing; 2 custom partitioners, zstd (port 8080)
 │   ├── events-consumer-a/            ← Kafka → PostgreSQL, transactional + idempotent, retry topics, share group, replay (port 8081)
 │   ├── events-consumer-b/            ← same code as a, same groups, KIP-848 group protocol (port 8086)
-│   └── connect/                      ← Kafka Connect JDBC sink → PostgreSQL "events" + reconciliation SQL
+│   └── connect/                      ← Kafka Connect: JDBC sink → PostgreSQL "events", Debezium outbox → "coffee-orders"; reconciliation SQL
 └── kafka-stream/                     ← Kafka Streams (README: kafka-stream/README.md)
     ├── orders-domain/                ← shared domain records (library JAR)
     └── orders-streams-app/           ← order count & revenue topology (port 8082)
@@ -62,7 +62,7 @@ This repo creates its topics programmatically with Spring Kafka's [`TopicBuilder
 | `library-events.DLT` | 3              | `kafka-core/events-consumer-a/.../config/LibraryEventsConsumerConfig.java`       |
 | `orders`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
 | `stores`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
-| `coffee-orders`      | broker default | created implicitly on first produce by `CoffeeOrdersProducer` (in `events-producer`) |
+| `coffee-orders`      | 3              | `kafka-core/docker-compose.yml` (`kafka-init`); written by the Debezium outbox   |
 
 The **key** a producer assigns to a record determines which partition it lands on (`hash(key) % numPartitions`, by default). `LibraryEventProducer` keys every record by `libraryEventId` (an [`Integer`][Integer]); `OrdersTopology` re-keys the incoming order stream by `locationId` via `.selectKey((key, order) -> order.locationId())` specifically so that all orders for the same store land on the same partition — which is what makes per-store aggregation with a local state store possible (see Part 4).
 
@@ -126,7 +126,8 @@ Kafka retains records for a configured time/size window (topic retention), indep
 flowchart LR
     subgraph "kafka-core (3 brokers, KRaft)"
         ProducerAPI["events-producer\nREST :8080"] -->|"Avro LibraryEventAvro\nkey=libraryEventId"| T1[("library-events\n3 partitions, RF 3")]
-        ProducerAPI -->|"Avro CoffeeOrder\nkey=order UUID"| T2[("coffee-orders")]
+        ProducerAPI -->|"coffee order + outbox row\n(one DB transaction)"| PG[(PostgreSQL + Flyway)]
+        PG -.->|"Debezium outbox\n(Kafka Connect)"| T2[("coffee-orders")]
         ProducerAPI -. "register/fetch schema" .-> SR[["Schema Registry\n:8085"]]
         T1 -->|"P0, P1"| ConsumerA["events-consumer-a\n:8081"]
         T1 -->|"P2"| ConsumerB["events-consumer-b\n:8086"]
@@ -138,7 +139,7 @@ flowchart LR
         ConsumerB --> PG
         ConsumerA -.->|"RecoverableDataAccessException"| RT[("library-events.retry\nretry-attempt header")]
         RT -.->|"scheduled drain\n(app.retry.interval)"| ConsumerA
-        T1 -->|"own consumer group"| KC["Kafka Connect\nJDBC sink :8083"]
+        T1 -->|"own consumer group"| KC["Kafka Connect :8083\nJDBC sink + Debezium outbox"]
         KC -->|"events (replica)"| PG
     end
 
@@ -254,8 +255,8 @@ The root `docker-compose.yml` `include:`s [`kafka-core/docker-compose.yml`](kafk
 |---|---|---|
 | Kafka (KRaft, 3 brokers) | `localhost:9092`, `9093`, `9094` | `broker,controller` on each node; topics created by `kafka-init` |
 | Schema Registry | http://localhost:8085 | Avro schemas |
-| PostgreSQL | `localhost:5435` (library/library) | consumer data, idempotency table, Connect replica |
-| Kafka Connect | http://localhost:8083 | JDBC sink → `events` table |
+| PostgreSQL | `localhost:5435` (library/library) | consumer data, idempotency table, Connect replica, coffee outbox (`wal_level=logical`) |
+| Kafka Connect | http://localhost:8083 | JDBC sink → `events` table; Debezium outbox → `coffee-orders` |
 | Kafdrop (Kafka UI) | http://localhost:9001 | Avro-aware |
 | Prometheus | http://localhost:9091 | scrapes the apps via `host.docker.internal` |
 | Grafana | http://localhost:3001 (admin/admin) | ***Learning Kafka*** dashboard, provisioned |
@@ -345,7 +346,7 @@ Response `200 OK` with the same shape (`eventType: LibraryEvent.UPDATE`); `400` 
 { "name": "Ada", "nickName": "Countess" }
 ```
 
-Response `201 Created`: the order's id, name, status, ordered time and its `metadata` (`eventType: CoffeeOrder.PLACED`). VIP customers (`Ada`, `Grace`) go to partition 0 — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression).
+Response `201 Created`: the order's id, name, status, ordered time and its `metadata` (`eventType: CoffeeOrder.PLACED`). VIP customers (`Ada`, `Grace`) go to partition 0 — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression). The order and its event are committed to PostgreSQL in one transaction (transactional outbox) and Debezium publishes the event — see [kafka-core §32](kafka-core/README.md#32-transactional-outbox-for-coffee-orders-debezium).
 
 ### <span style="color:hsl(220,80%,58%)">POST /v1/key-routing — Send a record whose key picks the partition</span>
 
@@ -406,7 +407,7 @@ cd kafka-core && mvn test
 | Module | Tests |
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
-| `kafka-core/events-producer` | 36 — incl. both partitioners, key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
+| `kafka-core/events-producer` | 47 — incl. the key-substring partitioner and VIP rule, the coffee outbox against a real PostgreSQL (logical decoding), key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
 | `kafka-core/events-consumer-a` / `-b` | 35 each (b on the KIP-848 protocol) — incl. the retry topic and its scheduled drain |
 | `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
@@ -422,7 +423,8 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 <ul>
 
 - REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`, `POST /v1/coffee-orders`, `POST /v1/key-routing`, `POST /v1/key-routing/partitions/{partition}`
-- Custom partitioners, each on its own template: `CoffeeVipPartitioner` (VIP customers → partition 0) and `KeySubstringPartitioner` (keys sharing a substring → one partition)
+- `KeySubstringPartitioner` on the key-routing template (keys sharing a substring → one partition); coffee orders get their partition from `VipPartitionRule` (VIP customers → partition 0) through the outbox
+- Coffee orders: ***transactional outbox*** (schema `coffee`, Flyway) published by Debezium's Outbox Event Router
 - `zstd` compression of every batch before it is sent, with `linger.ms=20` so batches fill
 - Publishes Avro via Confluent [`KafkaAvroSerializer`][KafkaAvroSerializer]; schemas registered automatically to `http://localhost:8085`
 - Kafka producer with async [`CompletableFuture`][CompletableFuture]-based send; idempotent (`acks=all`)

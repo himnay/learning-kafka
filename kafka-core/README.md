@@ -33,6 +33,7 @@
 29. 🛠️ [Kafka CLI cheat sheet](#29-kafka-cli-cheat-sheet)
 30. 🔐 [Enabling TLS (SSL) and mutual TLS](#30-enabling-tls-ssl-and-mutual-tls)
 31. 🧪 [Tests](#31-tests)
+32. 📮 [Transactional outbox for coffee orders (Debezium)](#32-transactional-outbox-for-coffee-orders-debezium)
 
 ---
 
@@ -76,10 +77,10 @@ For the broader repo architecture and core Kafka vocabulary, see the [root READM
 ```
 kafka-core/
 ├── docker-compose.yml           3 Kafka brokers + topic init + Schema Registry + PostgreSQL + Kafka Connect + Kafdrop
-├── connect/                     JDBC sink connector config + reconciliation SQL
+├── connect/                     connector configs (JDBC sink, Debezium outbox) + reconciliation SQL
 ├── schemas/                     Avro .avsc files → generated Java (library JAR, no Spring Boot)
-├── events-producer/             REST API (port 8080) → "library-events", "coffee-orders" (Avro, VIP partitioner)
-│                                and "key-routing" (String, key-substring partitioner); zstd-compressed batches
+├── events-producer/             REST API (port 8080) → "library-events" (Avro) and "key-routing" (String, key-substring
+│                                partitioner), zstd-compressed batches; coffee orders → PostgreSQL outbox, published by Debezium
 ├── events-consumer-a/           port 8081: library-events → PostgreSQL + compacted "library-book-state",
 │                                coffee-orders → consumer group with retry topics + "coffee-baristas" share group, replay API
 └── events-consumer-b/           port 8086: same code as a, same groups — but on the KIP-848 group protocol
@@ -90,7 +91,8 @@ flowchart LR
     Client([HTTP client]) -->|POST/PUT /v1/libraryevent<br/>POST /v1/coffee-orders<br/>POST /v1/key-routing| P[events-producer<br/>:8080]
     P -.->|register / look up schema| SR[(Schema Registry<br/>:8085)]
     P -->|Avro, idempotent<br/>acks=all| T
-    P -->|Avro| CO
+    P -->|coffee order + outbox row<br/>one DB transaction| PG[(PostgreSQL<br/>library)]
+    PG -.->|Debezium outbox<br/>Kafka Connect| CO
     P -->|String, routed by<br/>key substring| KR
 
     subgraph K[Kafka cluster — 3 brokers, KRaft]
@@ -155,7 +157,7 @@ CurrentVoters: [1, 2, 3]
 - ***Leaders are spread across brokers*** so the load is shared. Which broker leads which partition can differ from run to run.
 - ***Clients bootstrap from any broker*** (`localhost:9092` is enough). The metadata response tells them every broker's address (`localhost:9092/9093/9094`), and they talk to each partition's leader directly.
 - ***If a broker dies***, the controller elects a new leader for its partitions from the in-sync followers. Try it with `docker stop kafka-core-kafka-2` and describe the topic again ([§20](#20-inspecting-the-cluster-and-the-registry)).
-- `coffee-orders` is auto-created on first send with the cluster defaults (3 partitions, RF 3).
+- `coffee-orders` is created by `kafka-init` (3 partitions, RF 3). Debezium writes each coffee event to the partition the producer chose ([§32](#32-transactional-outbox-for-coffee-orders-debezium)), so the topic must exist with enough partitions.
 
 ---
 
@@ -262,7 +264,7 @@ classDiagram
 - ***Records can't extend a class*** either, so `BaseEvent` is an interface whose default methods (`eventId()`, `eventType()`, `occurredAt()`) read the composed `metadata()` — the same shape as the Avro schemas.
 - ***`EventMetadata.of(event)`*** reads the `metadata` field of ***any*** generated event class (they are all `GenericRecord`s), so common handling doesn't need to know the event type.
 
-***Producer — stamping.*** `EventMetadataFactory` creates the metadata for every event: random id, current time, the app as source, and the `X-Correlation-Id` request header if present. The child events carry it into Avro (`LibraryEventAvroMapper`, `CoffeeOrdersProducer`), and the REST responses return it, so callers learn the eventId. Real response:
+***Producer — stamping.*** `EventMetadataFactory` creates the metadata for every event: random id, current time, the app as source, and the `X-Correlation-Id` request header if present. The child events carry it into Avro (`LibraryEventAvroMapper`, `CoffeeOrderService`), and the REST responses return it, so callers learn the eventId. Real response:
 
 ```json
 "metadata": {"eventId": "44b660dc-ca14-4d49-a939-438d4ca0b7cc", "eventType": "LibraryEvent.NEW", "eventVersion": 1,
@@ -326,8 +328,8 @@ erDiagram
     }
 ```
 
-- ***Producer and consumer*** — `POST /v1/coffee-orders` lives in `events-producer`, and the `CoffeeOrdersConsumer` listener lives in both consumer apps ([§9](#9-producers), [§10](#10-consumers)).
-- ***Logical types*** — `CoffeeOrder.id` is `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}`. The generated classes expose idiomatic `UUID` and [`Instant`][Instant] getters/setters (`CoffeeOrdersProducer.buildCoffeeOrder()` calls `.setId(UUID.randomUUID())` and `.setOrderedTime(Instant.now())`) while the wire format stays a plain string/long. `OrderLineItem.cost` uses a `bytes` logical `decimal` (precision 3, scale 2) so [`BigDecimal`][BigDecimal] round-trips exactly; the plugin turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
+- ***Producer and consumer*** — `POST /v1/coffee-orders` lives in `events-producer` (stored through a transactional outbox, published by Debezium — [§32](#32-transactional-outbox-for-coffee-orders-debezium)), and the `CoffeeOrdersConsumer` listener lives in both consumer apps ([§9](#9-producers), [§10](#10-consumers)).
+- ***Logical types*** — `CoffeeOrder.id` is `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}`. The generated classes expose idiomatic `UUID` and [`Instant`][Instant] getters/setters (`CoffeeOrderService.buildCoffeeOrder()` calls `.setId(...)` with a random UUID and `.setOrderedTime(...)` with the current time) while the wire format stays a plain string/long. `OrderLineItem.cost` uses a `bytes` logical `decimal` (precision 3, scale 2) so [`BigDecimal`][BigDecimal] round-trips exactly; the plugin turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
 - ***A schema not yet wired to any app*** — `CoffeeUpdateEvent.avsc` (`{id, status}`, `status` enum `PROCESSING | READY_FOR_PICK_UP`) compiles alongside the others but nothing produces or consumes it. It would be its own subject (`CoffeeUpdateEvent-value` if published), showing that the registry manages compatibility ***per subject***, not globally.
 
 ---
@@ -393,25 +395,30 @@ spring.kafka.producer:
 - **`enable.idempotence=true`** — see [§13](#13-idempotency-producer-and-consumer).
 - **Auto-topic-creation** (`AutoCreateConfig`) declares `library-events` and `key-routing` with `3` partitions via [`NewTopic`][NewTopic], so the app also works against a bare broker. With docker compose, `kafka-init` has already created them with RF 3, so this is a no-op there.
 
-### <span style="color:hsl(165,80%,58%)">`CoffeeOrdersProducer` (also in events-producer)</span>
+### <span style="color:hsl(165,80%,58%)">Coffee orders: `CoffeeOrdersController` → transactional outbox (also in events-producer)</span>
 
 ```java
-private final KafkaTemplate<String, CoffeeOrder> kafkaTemplate;   // value type is the generated Avro class
-
-kafkaTemplate.send(TOPIC, order.getId().toString(), order)        // key = order UUID as a String
+@Transactional                                                    // CoffeeOrderService.place
+public CoffeeOrderResponse place(CoffeeOrderRequest request, String correlationId) {
+    ...
+    orders.insert(order);                                         // coffee.coffee_order
+    outbox.append(new OutboxEvent(eventId, "coffee-orders", orderId, "CoffeeOrder.PLACED",
+            payloadSerializer.serialize(order),                   // KafkaAvroSerializer bytes
+            vipPartitionRule.partition(name, orderId, partitions), correlationId));   // INSERT + DELETE
+}
 ```
 
-- ***Its own `KafkaTemplate`, not a bean.*** Coffee keys are UUID strings, library keys are Integers. `CoffeeOrdersProducer` builds a String-keyed template from Boot's producer factory (`copyWithConfigurationOverride(key.serializer=StringSerializer)`). Declaring a second `KafkaTemplate` ***bean*** would make Boot's auto-configured template (used by `LibraryEventProducer`) back off.
-- ***Its own `client.id`*** — `events-producer-coffee-N`. The copied factory is not a Spring bean, so it can't name its producers after `spring.application.name` the way Boot's factory does (`events-producer-producer-N`); without a `client.id` they would show up as `producer-N` in metrics.
+- ***No `KafkaTemplate` for coffee orders*** — the order and its event are stored in one PostgreSQL transaction; Debezium publishes the event ([§32](#32-transactional-outbox-for-coffee-orders-debezium)). A `201` means "committed", even if Kafka is down at that moment.
+- ***Same bytes, key and partition as before*** — `KafkaAvroSerializer` produces the Confluent wire format the consumers already read, the key is the order id, and `VipPartitionRule` (the old `CoffeeVipPartitioner` arithmetic) picks the partition.
 - ***REST records in `domain`*** — `CoffeeOrderRequest` and `CoffeeOrderResponse` sit next to the library-event records in `com.learnkafka.domain`.
 
-`POST /v1/coffee-orders` (`CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, a real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the partition on success. It returns a `CoffeeOrderResponse` record rather than the Avro object ([§21](#21-gotchas-avro-112--spring-boot-4)).
+`POST /v1/coffee-orders` (`CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, a real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time (millisecond precision, as Avro's `timestamp-millis` stores it), `PickUp.IN_STORE`, `status = "NEW"` — and stores it with its outbox event. It returns a `CoffeeOrderResponse` record rather than the Avro object ([§21](#21-gotchas-avro-112--spring-boot-4)).
 
 ### <span style="color:hsl(220,80%,58%)">`KeyRoutingProducer` (also in events-producer)</span>
 
 `POST /v1/key-routing` (`KeyRoutingRequest{key, message}`) sends the message as a plain ***String*** record to `key-routing`, keyed by whatever the caller sends, through a template that uses `KeySubstringPartitioner` ([§25](#25-custom-partitioner-and-compression)). It waits for the broker's ack and returns `KeyRoutingResponse{key, matchedSubstring, partition, offset}`, so you can see where each key landed.
 
-- ***Same pattern as coffee*** — its own String/String template built from Boot's producer factory: it inherits `acks`, idempotence, zstd and `linger.ms`, and has its own `client.id` (`events-producer-key-routing-N`).
+- ***Its own template, not a bean*** — a String/String template built from Boot's producer factory: it inherits `acks`, idempotence, zstd and `linger.ms`, and has its own `client.id` (`events-producer-key-routing-N`). A second `KafkaTemplate` ***bean*** would make Boot's auto-configured one (used by `LibraryEventProducer`) back off.
 - ***Rules checked at startup*** — the controller parses `app.key-routing.substring-partitions` itself, so a malformed rule stops the app instead of failing the first send.
 - ***Why a separate topic*** — the other keys can't show substring routing: library events are keyed by an Integer id (`null` for NEW) and coffee orders by a random UUID.
 
@@ -512,7 +519,7 @@ sequenceDiagram
     Consumer->>Consumer: dedupe, map to entity, save (DB tx), commit offset (Kafka tx)
 ```
 
-The coffee flow is the same with `CoffeeOrdersProducer`, subject `coffee-orders-value` and `CoffeeOrdersConsumer` (without the database and transaction steps).
+The coffee flow differs on the producer side: `CoffeeOrderService` serializes the `CoffeeOrder` (subject `coffee-orders-value`) into the outbox row and Debezium publishes those bytes ([§32](#32-transactional-outbox-for-coffee-orders-debezium)); `CoffeeOrdersConsumer` then reads them like any Avro record (without the database and transaction steps).
 
 ---
 
@@ -602,7 +609,7 @@ sequenceDiagram
 - ***Two transaction managers, one `@Primary`.*** `transactionManager` is a [`JpaTransactionManager`][JpaTransactionManager] declared explicitly and marked `@Primary`. Without it, Boot's JPA transaction manager can back off once a `KafkaTransactionManager` exists, and `@Transactional` would silently cover Kafka instead of the database. The service names it explicitly: `@Transactional("transactionManager")`.
 - ***`isolation.level=read_committed`*** — the consumers never see records from producer transactions that were aborted.
 - ***Sends must happen inside a transaction.*** A transactional `KafkaTemplate` refuses a send with no transaction open. Inside the listener the container has one open; elsewhere (for example in tests) use `kafkaTemplate.executeInTransaction(t -> t.sendDefault(...))`.
-- The producer app is not transactional; it only uses the idempotent producer. The coffee listener's container is not transactional either.
+- The producer app uses no Kafka transactions: library events and key routing rely on the idempotent producer, coffee orders on a database transaction plus Debezium ([§32](#32-transactional-outbox-for-coffee-orders-debezium)). The coffee listener's container is not transactional either.
 
 ---
 
@@ -869,6 +876,8 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | `app.retry.interval` | `30s` | fixed delay between drain runs |
 | `app.retry.max-attempts` | `3` | attempts from the retry topic before the DLT |
 | `app.retry.max-run` | `1m` | longest single drain run |
+| `spring.datasource.*`, `spring.flyway.schemas` (producer) | `library` database, schema `coffee` | the coffee outbox ([§32](#32-transactional-outbox-for-coffee-orders-debezium)) |
+| `app.coffee.partitions` (producer) | `3` | the VIP rule hashes non-VIP orders over partitions 1..N-1; checked against `coffee-orders` at startup |
 | `app.coffee.share-group.enabled` | `true` (default) | turns the barista share-group listener on/off ([§24](#24-share-groups-kafka-as-a-queue)) |
 | `spring.jpa.hibernate.ddl-auto` | `validate` | Flyway owns the schema |
 | `spring.jpa.open-in-view` | `false` | no lazy loading outside transactions |
@@ -1001,7 +1010,7 @@ The *Schema Registry* folder of [`insomnia-collection.json`](insomnia-collection
 <a id="22-data-replication-with-kafka-connect-and-reconciliation"></a>
 ## <span style="color:hsl(280,80%,58%)">22. 🔄 Data replication with Kafka Connect, and reconciliation</span>
 
-A ***Kafka Connect JDBC sink connector*** reads `library-events` and writes every record into a PostgreSQL table called `events`. No Spring Boot service is involved — the connector is just configuration ([`connect/library-events-jdbc-sink.json`](connect/library-events-jdbc-sink.json)). The table is a raw copy of ***what was sent***; the consumers' `processed_event` table records ***what was processed***. Comparing the two is reconciliation. Background: the wiki note *Kafka Connect* (connectors, workers, converters, SMTs, DLQ).
+A ***Kafka Connect JDBC sink connector*** reads `library-events` and writes every record into a PostgreSQL table called `events`. (The same Connect worker also runs a Debezium ***source*** connector, the coffee-orders outbox — [§32](#32-transactional-outbox-for-coffee-orders-debezium).) No Spring Boot service is involved — the connector is just configuration ([`connect/library-events-jdbc-sink.json`](connect/library-events-jdbc-sink.json)). The table is a raw copy of ***what was sent***; the consumers' `processed_event` table records ***what was processed***. Comparing the two is reconciliation. Background: the wiki note *Kafka Connect* (connectors, workers, converters, SMTs, DLQ).
 
 ```mermaid
 flowchart LR
@@ -1160,25 +1169,26 @@ The members' assignments ***overlap*** (partition 2 was given to two barista con
 <a id="25-custom-partitioner-and-compression"></a>
 ## <span style="color:hsl(54,80%,58%)">25. 🎯 Custom partitioners and compression</span>
 
-The producer app has two custom partitioners. Each is plugged into ***one template only*** (`partitioner.class` is a config override when that template is built). Library events keep Kafka's built-in partitioner, including ***sticky partitioning*** for their null keys, which any custom partitioner would turn off.
+The producer app has one custom Kafka partitioner and one partition rule. `KeySubstringPartitioner` is plugged into ***one template only*** (`partitioner.class` is a config override when that template is built). `VipPartitionRule` is not a Kafka partitioner at all: Debezium, not the app, sends coffee orders, so the rule's result is stored in the outbox row ([§32](#32-transactional-outbox-for-coffee-orders-debezium)). Library events keep Kafka's built-in partitioner, including ***sticky partitioning*** for their null keys, which any custom partitioner would turn off.
 
 | Partitioner | Topic | Decides by | Guarantee |
 |---|---|---|---|
-| `CoffeeVipPartitioner` | `coffee-orders` | the ***value*** (customer name) | VIP orders get partition 0 ***to themselves*** |
+| `VipPartitionRule` (outbox) | `coffee-orders` | the ***customer name*** in the order | VIP orders get partition 0 ***to themselves*** |
 | `KeySubstringPartitioner` | `key-routing` | a ***substring of the key*** | every key containing the substring lands on ***one*** partition |
 
-### <span style="color:hsl(96,80%,50%)">`CoffeeVipPartitioner`: reserve a partition</span>
+### <span style="color:hsl(96,80%,50%)">`VipPartitionRule`: reserve a partition</span>
 
 It gives VIP customers partition 0 to themselves and hashes everyone else (murmur2, like Kafka's default) over partitions 1..N-1:
 
 ```java
-if (value instanceof CoffeeOrder order && vipCustomers.contains(order.getName().toString())) {
+if (partitions < 2 || vipCustomers.contains(customerName)) {
     return 0;
 }
-return 1 + Utils.toPositive(Utils.murmur2(keyBytes)) % (numPartitions - 1);
+return 1 + Utils.toPositive(Utils.murmur2(key.getBytes(UTF_8))) % (partitions - 1);
 ```
 
-- ***Configured on the coffee template*** (`copyWithConfigurationOverride`), with `app.coffee.vip-customers: Ada,Grace` passed in as the producer property `coffee.vip.customers`.
+- ***Was a Kafka `Partitioner`*** (`CoffeeVipPartitioner`, plugged into the coffee template). With the outbox the app no longer sends coffee orders, so the rule runs when the outbox row is written (`partition_no`), and Debezium's Outbox Event Router sends the record to that partition. Same arithmetic, so an order id keeps its partition.
+- ***Configured by*** `app.coffee.vip-customers: Ada,Grace` and `app.coffee.partitions: 3` (checked against the topic at startup).
 - ***Real run*** — `Ada → P0`, `Ada → P0`, `Grace → P0`; `Linus → P2`, `Ken → P1`, `Margaret → P1`, `Barbara → P2`.
 - ***Risk*** — a hot VIP partition caps VIP throughput at one consumer.
 
@@ -1204,7 +1214,7 @@ return Utils.toPositive(Utils.murmur2(keyBytes)) % numPartitions;   // no match:
   - `UK`, `US` — ***hashed***: Kafka's murmur2 hash of the ***substring*** instead of the whole key, so every key containing it gets the same partition. On 3 partitions `UK` → 1 and `US` → 2. You don't pick the number, and adding partitions moves it, as with any key hash; pinned rules stay put.
 - ***First match wins***, in configured order: `US-VIP-9` goes to 0. Matching is ***case-sensitive***: `vip` is not `VIP`.
 - ***Why*** — Kafka orders records only ***within a partition***. Related records with distinct keys (`order-VIP-1001`, `member-7-VIP`) land on one partition, so one consumer of a group reads all of them, in order.
-- ***Pinning doesn't reserve*** — unmatched keys can still hash onto partition 0 (`CoffeeVipPartitioner` shows how to reserve one). A busy substring also caps its throughput at one consumer.
+- ***Pinning doesn't reserve*** — unmatched keys can still hash onto partition 0 (`VipPartitionRule` shows how to reserve one). A busy substring also caps its throughput at one consumer.
 - ***Mistakes fail loudly*** — a malformed rule (`VIP=x`, `=1`, `VIP=-1`) stops the app at startup with a `ConfigException`. A pinned partition the topic doesn't have (`VIP=5` on 3 partitions) fails the send with `Rule VIP=5 needs partition 5, but topic key-routing has 3 partitions`. Kafka doesn't check this itself: the record would wait for a partition that never appears, then time out after `delivery.timeout.ms` (2 minutes).
 - ***Keyless records*** get a random partition: a custom partitioner can't hand them back to Kafka's sticky logic (returning `-1` is an error).
 - ***An explicit partition beats every partitioner*** — a record sent with a partition number (`POST /v1/key-routing/partitions/{partition}`, [§9](#9-producers)) never reaches `partitioner.class`. The producer checks that partition up front instead: one the topic doesn't have makes `send()` block for `max.block.ms` (60 s), then fail with `Partition 7 of topic key-routing with partition count 3 is not present in metadata after 60000 ms.` A partitioner that returns such a partition fails later and slower, after `delivery.timeout.ms` (see ***Mistakes fail loudly***).
@@ -1456,12 +1466,12 @@ spring.kafka:
 <a id="31-tests"></a>
 ## <span style="color:hsl(120,80%,58%)">31. 🧪 Tests</span>
 
-No Schema Registry container is needed: tests point `schema.registry.url` at ***`mock://...`***, Confluent's in-memory registry shared by every serializer/deserializer in the JVM with the same scope. The library consumers also use a real ***PostgreSQL Testcontainer*** (`TestcontainersConfiguration`, [`@ServiceConnection`][ServiceConnection]), so Flyway runs the production migrations in every test run.
+No Schema Registry container is needed: tests point `schema.registry.url` at ***`mock://...`***, Confluent's in-memory registry shared by every serializer/deserializer in the JVM with the same scope. The library consumers and the producer (coffee outbox) also use a real ***PostgreSQL Testcontainer*** (`TestcontainersConfiguration`, [`@ServiceConnection`][ServiceConnection]), so Flyway runs the production migrations in every test run.
 
 | Module | Tests | What they cover |
 |---|---|---|
 | `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
-| `events-producer` | 36 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersProducerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key; for an explicit partition, 201 from that partition and 400 for partitions 3 and -1); `ExplicitPartitionIntegrationTest` (a VIP key sent to partition 2 lands on 2, not on the VIP rule's 0; a missing partition is a 400 at once, not a 60 s wait) |
+| `events-producer` | 47 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `VipPartitionRuleTest` (VIP → P0, others never P0, same key → same partition, same arithmetic as the old partitioner); `CoffeeOutboxIntegrationTest` (real PostgreSQL with `wal_level=logical`: a `test_decoding` replication slot shows exactly what Debezium reads — order INSERT, outbox INSERT, outbox DELETE in one transaction — plus the Avro payload, VIP → partition 0, a NULL correlation id, and the rollback when the outbox write fails); `CoffeeSchemaIntegrationTest` (Flyway creates the `coffee` schema); `CoffeeTopicCheckTest` (partition-count check); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersControllerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key; for an explicit partition, 201 from that partition and 400 for partitions 3 and -1); `ExplicitPartitionIntegrationTest` (a VIP key sent to partition 2 lands on 2, not on the VIP rule's 0; a missing partition is a 400 at once, not a 60 s wait) |
 | `events-consumer-a` / `-b` | 35 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
@@ -1477,6 +1487,93 @@ Library consumer tests (identical in a and b):
 ```bash
 cd kafka-core && mvn -T 4 clean install         # all four modules (82 tests)
 ```
+
+---
+
+<a id="32-transactional-outbox-for-coffee-orders-debezium"></a>
+## <span style="color:hsl(300,80%,58%)">32. 📮 Transactional outbox for coffee orders (Debezium)</span>
+
+Writing to a database ***and*** to Kafka in one request is a ***dual write***: the app can commit one and crash before the other, and no transaction spans both (Kafka has no XA). The ***transactional outbox*** removes the second write. The app stores the event in an ***outbox table, in the same database transaction*** as the business row, and something else turns committed outbox rows into Kafka records. Here that is ***Debezium*** reading the PostgreSQL write-ahead log (change data capture): no polling, and the app never talks to Kafka for coffee orders.
+
+```mermaid
+flowchart LR
+    C([HTTP client]) -->|POST /v1/coffee-orders| P[events-producer<br/>CoffeeOrderService]
+    P -->|one DB transaction:<br/>INSERT coffee_order<br/>INSERT + DELETE outbox_event| DB[(PostgreSQL<br/>schema coffee)]
+    DB -->|WAL, logical decoding<br/>pgoutput| D[Debezium PostgresConnector<br/>+ Outbox Event Router<br/>Kafka Connect :8083]
+    D -->|key = order id<br/>partition = partition_no<br/>value = stored Avro bytes| T[(coffee-orders)]
+    T --> CA[events-consumer-a / -b<br/>unchanged]
+```
+
+### <span style="color:hsl(77,80%,50%)">What the producer writes</span>
+
+Schema `coffee` (Flyway, `V1__create_coffee_order_and_outbox_event.sql`) in the same `library` database as the consumers' tables:
+
+| Table | Columns | Role |
+|---|---|---|
+| `coffee_order` | `id`, `name`, `nick_name`, `store_id`, `status`, `pick_up`, `ordered_time` | the business row |
+| `outbox_event` | `id` (event id), `aggregatetype` (= topic `coffee-orders`), `aggregateid` (order id = key), `type` (`CoffeeOrder.PLACED`), `payload` (`bytea`), `partition_no`, `correlation_id`, `created_at` | the event, exactly as it should reach Kafka |
+
+- ***One transaction*** — `CoffeeOrderService.place` (`@Transactional`) inserts the order, then `OutboxRepository.append` inserts the event ***and deletes it again*** before the commit. Order and event commit together or not at all.
+- ***Why delete at once*** — Debezium reads the WAL, not the table. The INSERT is in the log; the router turns it into the Kafka record and drops the DELETE. The table stays empty, needs no clean-up job, and a connector snapshot can never re-send old events.
+- ***`payload` is the Kafka value*** — `KafkaAvroSerializer` output (magic byte + schema id + Avro), the same bytes the old `KafkaTemplate` sent. So Schema Registry is still needed when an order is written (first use of the schema; cached after).
+- ***`partition_no`*** — `VipPartitionRule` ([§25](#25-custom-partitioner-and-compression)) with `app.coffee.partitions: 3`. At startup `CoffeeTopicCheck` compares that with the real topic: fewer partitions → the app refuses to start (Debezium would be told to write to a partition that doesn't exist); more → a warning; Kafka unreachable → a warning, because writing an order must not depend on Kafka.
+
+### <span style="color:hsl(214,80%,58%)">The connector</span>
+
+[`connect/coffee-outbox.json`](connect/coffee-outbox.json), registered by `kafka-connect-init` next to the JDBC sink ([§22](#22-data-replication-with-kafka-connect-and-reconciliation)):
+
+| Option | Value | Why |
+|---|---|---|
+| `connector.class` | `io.debezium.connector.postgresql.PostgresConnector` | Debezium ***3.7.0.Final*** (as of 2026), downloaded by the one-shot `debezium-plugin` service: Confluent Hub only has 3.2.x and the Connect image has no `curl` |
+| `plugin.name` | `pgoutput` | PostgreSQL's built-in logical decoding plugin |
+| `slot.name` / `publication.name` | `coffee_outbox_slot` / `coffee_outbox_publication` | the replication slot keeps WAL until Debezium has read it |
+| `publication.autocreate.mode` | `all_tables` | a `filtered` publication needs `coffee.outbox_event` to exist when the connector starts — but the producer's Flyway creates it only when the producer first runs |
+| `table.include.list` | `coffee.outbox_event` | only outbox changes become events |
+| `snapshot.mode` | `no_data` | stream from now on; the table is always empty anyway |
+| `heartbeat.interval.ms` | `10000` | keeps the slot's confirmed position moving while only other tables change, so PostgreSQL can recycle WAL |
+| `extended.headers.enabled` | `false` | otherwise Debezium 3.7 adds four `__debezium.context.*` headers to every record |
+| `value.converter` | `io.debezium.converters.BinaryDataConverter` (+ JSON delegate) | writes the `payload` bytes unchanged; the delegate only serializes heartbeats |
+| `key.converter` | `StringConverter` | the order id as a String key, as before |
+| `transforms.outbox.*` | `EventRouter`, `route.by.field=aggregatetype`, `route.topic.replacement=${routedByValue}`, `table.field.event.key=aggregateid` | topic = `coffee-orders`, key = the order id |
+| `transforms.outbox.table.fields.additional.placement` | `type:header:event-type,correlation_id:header:correlation-id,partition_no:partition` | two headers, and the partition the producer chose |
+
+PostgreSQL runs with `wal_level=logical` (compose `command`). The `library` user is a superuser in the official image, so it may replicate and create the publication.
+
+### <span style="color:hsl(351,80%,58%)">Delivery semantics</span>
+
+- ***Atomic on the producer side*** — a `201` means order and event are both committed, even if Kafka or Kafka Connect is down at that moment.
+- ***At-least-once to Kafka*** — after a crash the connector resumes from its stored WAL position and can send an event again. The coffee consumers only log, so a duplicate is harmless; a consumer that changes state would dedupe on the `id` header (the event id), as the library consumers do with `processed_event` ([§13](#13-idempotency-producer-and-consumer)).
+- ***Order*** — WAL order, one connector task.
+- ***Consumers unchanged*** — same topic, key type and Avro bytes. New headers `id`, `event-type`, `correlation-id`; without `X-Correlation-Id` the `correlation-id` header is there with a null value.
+
+### <span style="color:hsl(128,80%,45%)">Running it</span>
+
+`docker compose up -d` in `kafka-core` does it all: `debezium-plugin` downloads the plugin once into the `kafka-core-connect-plugins` volume, `kafka-connect` waits for it (and is healthy only once both the JDBC sink and the Debezium plugin are loaded), and `kafka-connect-init` registers both connectors. On a stack that is already running, the same command recreates `postgres` (new `wal_level`) and `kafka-connect`.
+
+```bash
+curl -s localhost:8083/connectors/coffee-outbox/status        # connector and task RUNNING
+docker exec kafka-core-postgres psql -U library -d library \
+  -c "select slot_name, plugin, active, confirmed_flush_lsn from pg_replication_slots"
+```
+
+- ***Tearing down*** — a replication slot keeps WAL until it is read. If you delete the connector but keep PostgreSQL, drop the slot: `select pg_drop_replication_slot('coffee_outbox_slot');`.
+
+***Real run*** — Debezium 3.7.0.Final on `cp-kafka-connect:8.3.2` against this 3-broker cluster (producer on `:18080`, beside a running stack):
+
+```text
+POST /v1/coffee-orders  X-Correlation-Id: e2e-1  {"name":"Ada","nickName":"a"}   → 201
+POST /v1/coffee-orders                           {"name":"Linus"}                → 201
+coffee.coffee_order: 2 rows      coffee.outbox_event: 0 rows
+
+kafka-console-consumer --topic coffee-orders --property print.partition=true --property print.headers=true --property print.key=true
+Partition:0  id:73809e51-…,event-type:CoffeeOrder.PLACED,correlation-id:e2e-1        d8df7768-…   (Ada, VIP)
+Partition:2  id:c6ed3336-…,event-type:CoffeeOrder.PLACED,correlation-id:null         19d153dc-…   (Linus)
+
+Kafka Connect stopped → POST {"name":"Grace"} → 201 → Kafka Connect started again
+Partition:0  id:99ecf677-…,event-type:CoffeeOrder.PLACED,correlation-id:e2e-outage   628bdfa1-…   (arrived after the restart)
+```
+
+`kafka-avro-console-consumer` decodes the values exactly as before, e.g. Ada's `metadata`: `{"eventId": "73809e51-…", "eventType": "CoffeeOrder.PLACED", "source": "events-producer", "correlationId": "e2e-1"}`.
 
 <!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
 

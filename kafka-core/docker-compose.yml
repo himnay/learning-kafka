@@ -102,7 +102,8 @@ services:
     command:
       - |
         # key-routing: String keys routed by KeySubstringPartitioner (producer app)
-        for t in library-events library-events.retry library-events.DLT key-routing; do
+        # coffee-orders: Debezium writes each outbox event to the partition the producer chose (VIP rule)
+        for t in library-events library-events.retry library-events.DLT key-routing coffee-orders; do
           kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists \
             --topic "$$t" --partitions 3 --replication-factor 3 --config min.insync.replicas=2
         done
@@ -142,6 +143,8 @@ services:
   postgres:
     image: postgres:19beta3  # PostgreSQL 19 is still in beta (as of 2026); use 18 for anything stable
     container_name: kafka-core-postgres
+    # wal_level=logical: Debezium reads the coffee outbox from the write-ahead log (logical decoding)
+    command: postgres -c wal_level=logical
     ports:
       - "5435:5432"
     environment:
@@ -156,7 +159,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── One-shot: Debezium PostgreSQL connector plugin for Kafka Connect ──────
+  # Confluent Hub only has Debezium 3.2.x and the Connect image has no curl, so this downloads the
+  # 3.7.0.Final plugin from Maven Central (once) into a volume the Connect worker mounts on its plugin path.
+  debezium-plugin:
+    image: curlimages/curl:8.11.1
+    container_name: kafka-core-debezium-plugin
+    user: root
+    volumes:
+      - kafka-core-connect-plugins:/plugins
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -d /plugins/debezium-connector-postgres ]; then echo "Debezium plugin already installed"; exit 0; fi
+        curl -fsSL https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/3.7.0.Final/debezium-connector-postgres-3.7.0.Final-plugin.tar.gz \
+          | tar -xz -C /plugins
+        ls /plugins
+    restart: "no"
+
   # ── Kafka Connect — replicate library-events into PostgreSQL table "events" ──
+  # ...and publish the coffee-orders outbox: a Debezium PostgreSQL SOURCE connector reads the
+  # outbox inserts from the write-ahead log and its Outbox Event Router writes them to coffee-orders.
   # A JDBC SINK connector does what a hand-written consumer app would: it reads the topic
   # (its own consumer group "connect-library-events-jdbc-sink", independent of the apps)
   # and upserts every record keyed by (topic, partition, offset). The table is a raw copy of
@@ -170,8 +193,11 @@ services:
       kafka-3: { condition: service_healthy }
       schema-registry: { condition: service_healthy }
       postgres: { condition: service_healthy }
+      debezium-plugin: { condition: service_completed_successfully }
     ports:
       - "8083:8083"   # Connect REST API
+    volumes:
+      - kafka-core-connect-plugins:/usr/share/debezium-plugins:ro
     environment:
       CONNECT_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
       CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
@@ -185,7 +211,7 @@ services:
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
       CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
       CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/usr/share/debezium-plugins
       # lets a connector override its own consumer settings (isolation.level=read_committed)
       CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY: All
     command:
@@ -197,13 +223,15 @@ services:
         exec /etc/confluent/docker/run
     healthcheck:
       # image has no curl: plain HTTP request over bash's /dev/tcp
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8083 && printf 'GET /connector-plugins HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q 'JdbcSinkConnector' <&3"]
+      # healthy once BOTH plugins are loaded: the JDBC sink and Debezium's PostgresConnector
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8083 && printf 'GET /connector-plugins HTTP/1.0\\r\\n\\r\\n' >&3 && r=$$(cat <&3) && [[ $$r == *JdbcSinkConnector* && $$r == *PostgresConnector* ]]"]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 40s
 
-  # ── One-shot: register (or update) the JDBC sink connector ─────────────────
+  # ── One-shot: register (or update) both connectors ─────────────────────────
+  # connect/<name>.json is the config of connector <name>: the JDBC sink and the Debezium outbox source
   kafka-connect-init:
     image: curlimages/curl:8.11.1
     container_name: kafka-core-kafka-connect-init
@@ -211,11 +239,16 @@ services:
       kafka-connect: { condition: service_healthy }
     volumes:
       - ./connect:/connect:ro
-    # PUT .../config creates the connector or updates it — safe to re-run
-    command: >
-      -sS -f -X PUT -H "Content-Type: application/json"
-      --data @/connect/library-events-jdbc-sink.json
-      http://kafka-connect:8083/connectors/library-events-jdbc-sink/config
+    # PUT .../config creates a connector or updates it — safe to re-run
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for c in library-events-jdbc-sink coffee-outbox; do
+          curl -sS -f -X PUT -H "Content-Type: application/json" --data @/connect/$$c.json \
+            http://kafka-connect:8083/connectors/$$c/config
+          echo
+        done
     restart: "no"
 
   # ── Kafdrop — Kafka Web UI ─────────────────────────────────────────────────
@@ -239,3 +272,4 @@ volumes:
   kafka-core-kafka-2-data:
   kafka-core-kafka-3-data:
   kafka-core-postgres-data:
+  kafka-core-connect-plugins:       # Debezium plugin, downloaded once by debezium-plugin

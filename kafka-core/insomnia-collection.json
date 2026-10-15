@@ -179,7 +179,8 @@
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"name\": \"Ada\",\n  \"nickName\": \"Countess\"\n}"
-      }
+      },
+      "description": " Stored with its outbox event in PostgreSQL; Debezium publishes it to coffee-orders (README §32)."
     },
     {
       "_id": "req_post_coffee_order_blank",
@@ -197,7 +198,8 @@
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"name\": \"\"\n}"
-      }
+      },
+      "description": " Stored with its outbox event in PostgreSQL; Debezium publishes it to coffee-orders (README §32)."
     },
     {
       "_id": "req_post_coffee_vip",
@@ -206,7 +208,7 @@
       "name": "POST — VIP customer (→ partition 0)",
       "method": "POST",
       "url": "http://localhost:8080/v1/coffee-orders",
-      "description": "CoffeeVipPartitioner: Ada and Grace always go to partition 0.",
+      "description": "VIP rule (VipPartitionRule): Ada and Grace always go to partition 0. Stored with its outbox event in PostgreSQL; Debezium publishes it to coffee-orders (README §32).",
       "headers": [
         {
           "name": "Content-Type",
@@ -225,7 +227,7 @@
       "name": "POST — Flaky order (succeeds on coffee-orders-retry-0)",
       "method": "POST",
       "url": "http://localhost:8080/v1/coffee-orders",
-      "description": "Fails once on the main topic, succeeds on the first retry topic (@RetryableTopic).",
+      "description": "Fails once on the main topic, succeeds on the first retry topic (@RetryableTopic). Stored with its outbox event in PostgreSQL; Debezium publishes it to coffee-orders (README §32).",
       "headers": [
         {
           "name": "Content-Type",
@@ -244,7 +246,7 @@
       "name": "POST — Failing order (→ coffee-orders-dlt)",
       "method": "POST",
       "url": "http://localhost:8080/v1/coffee-orders",
-      "description": "Fails on every attempt: retry-0, retry-1, retry-2, then coffee-orders-dlt.",
+      "description": "Fails on every attempt: retry-0, retry-1, retry-2, then coffee-orders-dlt. Stored with its outbox event in PostgreSQL; Debezium publishes it to coffee-orders (README §32).",
       "headers": [
         {
           "name": "Content-Type",
@@ -263,7 +265,7 @@
       "name": "POST — Busy barista (share group RELEASE, redelivered)",
       "method": "POST",
       "url": "http://localhost:8080/v1/coffee-orders",
-      "description": "Share group coffee-baristas releases it on delivery 1 and accepts it on delivery 2.",
+      "description": "Share group coffee-baristas releases it on delivery 1 and accepts it on delivery 2. Stored with its outbox event in PostgreSQL; Debezium publishes it to coffee-orders (README §32).",
       "headers": [
         {
           "name": "Content-Type",
