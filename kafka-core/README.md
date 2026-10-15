@@ -662,7 +662,7 @@ processor.addNotRetryableExceptions(IllegalArgumentException.class, DataIntegrit
 
 - ***Deterministic failures skip the retries*** — they can never succeed: an `UPDATE` for an unknown id or a `NEW` that carries an id (`IllegalArgumentException`), a `NEW` for a `book_id` that already exists (`DataIntegrityViolationException` from the primary key), and bytes that are not Avro (`DeserializationException`). Each lands on the DLT after exactly one attempt.
 - ***Why a NEW must not carry an id*** — Spring Data would `merge()` it as an existing row, and Hibernate 6.6+ rejects merging an entity whose generated id isn't in the table (`ObjectOptimisticLockingFailureException`) — on every retry. The producer answers `400` for such a POST, and the consumer rejects it too (other producers may not).
-- ***Recovery looks through the whole cause chain*** for `RecoverableDataAccessException`, since the listener's exception arrives wrapped (`RetryRouter.isRecoverable`).
+- ***Recovery looks through the whole cause chain*** for a transient failure, since the listener's exception arrives wrapped (`RetryRouter.isRecoverable`). A real PostgreSQL outage never surfaces as `RecoverableDataAccessException`: the JPA transaction fails to start (`CannotCreateTransactionException`) with Hikari's `SQLTransientConnectionException` underneath. The consumers set Hikari's `connection-timeout` to 5 s, so an outage reaches the retry topic within seconds instead of stalling the listener.
 - ***`commitRecovered = true`*** — once the recoverer has handled a record, its send (retry topic / DLT) and the record's offset commit in ***one new Kafka transaction***, so the record is never processed again.
 - ***`DeserializationException` is never retried*** (Spring Kafka's default) — bad bytes stay bad.
 
@@ -670,7 +670,7 @@ Recovery strategy — `RetryRouter`, the recoverer shared with the drain job, ke
 
 | Root cause | Behavior |
 |---|---|
-| [`RecoverableDataAccessException`][RecoverableDataAccessException] | Treated as transient — forwarded to **`library-events.retry`** with header `retry-attempt: 1`, same partition number; the scheduled drain job retries it ([below](#retry-topic-and-the-scheduled-drain)) |
+| a ***transient failure*** anywhere in the cause chain — the database unreachable or briefly overloaded: `CannotCreateTransactionException`, `DataAccessResourceFailureException` (incl. `CannotGetJdbcConnectionException`), `TransientDataAccessException`, [`RecoverableDataAccessException`][RecoverableDataAccessException], `SQLTransientException`, `SQLRecoverableException` | Treated as transient — forwarded to **`library-events.retry`** with header `retry-attempt: 1`, same partition number; the scheduled drain job retries it ([below](#retry-topic-and-the-scheduled-drain)) |
 | anything else ([`IllegalArgumentException`][IllegalArgumentException], `DataIntegrityViolationException`, `DeserializationException`, or any exception that survives all retries) | Routed via [`DeadLetterPublishingRecoverer`][DeadLetterPublishingRecoverer] to **`library-events.DLT`**, same partition number as the original record |
 
 ***What lands on the DLT*** — the library consumers publish with a [`DelegatingByTypeSerializer`][DelegatingByTypeSerializer] (set by a `DefaultKafkaProducerFactoryCustomizer` bean):
@@ -691,7 +691,7 @@ t=0s      record → listener throws (e.g. transient DB hiccup) → Kafka + DB t
 t=0s+1s   retry #1 (FixedBackOff delay = 1000ms)
 t=1s+1s   retry #2 (2 retries configured → 3 total attempts)
 t=2s      still failing → RetryRouter invoked inside a new Kafka transaction
-             → RecoverableDataAccessException? → "library-events.retry" (retry-attempt 1)
+             → transient failure (DB down, timeout)? → "library-events.retry" (retry-attempt 1)
              → anything else?                 → DeadLetterPublishingRecoverer → "library-events.DLT"
           → offset committed in that same transaction
 ```
@@ -706,7 +706,7 @@ A recoverable failure (the database is down) is worth retrying later, but not by
 ```mermaid
 flowchart LR
     M[(library-events)] --> L[main listener<br/>3 in-place attempts]
-    L -->|RecoverableDataAccessException| R[(library-events.retry<br/>retry-attempt: 1)]
+    L -->|transient failure<br/>e.g. database down| R[(library-events.retry<br/>retry-attempt: 1)]
     L -->|anything else| D[(library-events.DLT)]
     R --> J[RetryTopicDrainer<br/>every app.retry.interval]
     J -->|still recoverable,<br/>attempts left| R
@@ -724,7 +724,7 @@ flowchart LR
 ***One drain run*** (`RetryTopicDrainer`, `@Scheduled(fixedDelay = app.retry.interval)`, so runs never overlap):
 
 1. A fresh consumer joins `library-events-retry-group` and gets its share of the partitions (both consumer apps run the job).
-2. It notes where each partition ends ***now*** and processes only records below that point. A record re-queued during the run lands above it and waits for the next run: ***at most one attempt per record per run***.
+2. It notes where each partition ends ***now*** and processes only records below that point ***that have waited `app.retry.delay`*** on the retry topic, judged by the record's timestamp (the time it was forwarded). A record re-queued during the run — or forwarded seconds ago by the other consumer app, whose schedule runs independently — waits for a later run, so ***attempts are at least `app.retry.delay` apart***. A run also stops at `app.retry.max-run`, checked before each record (it fetches at most 50 per poll), because with the database down every attempt can take a connection timeout.
 3. Each record: Kafka transaction 1 = `processLibraryEvent` + the record's offset. On failure that transaction aborts (dropping a state record it may have sent) and transaction 2 forwards the record through `RetryRouter` — back to the retry topic with `retry-attempt + 1`, or to the DLT once `app.retry.max-attempts` are used up — together with the offset.
 4. A crash loses nothing: offsets are committed per record. If Kafka itself fails mid-run, the run stops and the next one reads that record again; a record whose database work had already committed is skipped by `processed_event` ([§13](#13-idempotency-producer-and-consumer)).
 
@@ -734,6 +734,7 @@ app:
     topic: library-events.retry
     group-id: library-events-retry-group
     interval: 30s       # fixed delay between two drain runs
+    delay: 30s          # a record is retried only after waiting this long (default: interval)
     max-attempts: 3     # attempts from the retry topic before the DLT
     max-run: 1m         # a single run never drains longer than this
 ```
@@ -874,8 +875,10 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | `spring.kafka.consumer.properties.group.protocol` | `consumer` — ***consumer-b only*** | KIP-848 ([§27](#27-kip-848-consumer-rebalance-protocol)) |
 | `app.retry.topic` / `app.retry.group-id` | `library-events.retry` / `library-events-retry-group` | retry topic and the drain job's own group ([§14](#retry-topic-and-the-scheduled-drain)) |
 | `app.retry.interval` | `30s` | fixed delay between drain runs |
+| `app.retry.delay` | `30s` (default: `interval`) | how long a record waits on the retry topic before it is retried, judged by its timestamp |
 | `app.retry.max-attempts` | `3` | attempts from the retry topic before the DLT |
-| `app.retry.max-run` | `1m` | longest single drain run |
+| `app.retry.max-run` | `1m` | longest single drain run (checked before each record) |
+| `spring.datasource.hikari.connection-timeout` (consumers) | `5000` | fail fast while PostgreSQL is down, so records move on to the retry topic |
 | `spring.datasource.*`, `spring.flyway.schemas` (producer) | `library` database, schema `coffee` | the coffee outbox ([§32](#32-transactional-outbox-for-coffee-orders-debezium)) |
 | `app.coffee.partitions` (producer) | `3` | the VIP rule hashes non-VIP orders over partitions 1..N-1; checked against `coffee-orders` at startup |
 | `app.coffee.share-group.enabled` | `true` (default) | turns the barista share-group listener on/off ([§24](#24-share-groups-kafka-as-a-queue)) |
@@ -1472,12 +1475,12 @@ No Schema Registry container is needed: tests point `schema.registry.url` at ***
 |---|---|---|
 | `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
 | `events-producer` | 47 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `VipPartitionRuleTest` (VIP → P0, others never P0, same key → same partition, same arithmetic as the old partitioner); `CoffeeOutboxIntegrationTest` (real PostgreSQL with `wal_level=logical`: a `test_decoding` replication slot shows exactly what Debezium reads — order INSERT, outbox INSERT, outbox DELETE in one transaction — plus the Avro payload, VIP → partition 0, a NULL correlation id, and the rollback when the outbox write fails); `CoffeeSchemaIntegrationTest` (Flyway creates the `coffee` schema); `CoffeeTopicCheckTest` (partition-count check); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersControllerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key; for an explicit partition, 201 from that partition and 400 for partitions 3 and -1); `ExplicitPartitionIntegrationTest` (a VIP key sent to partition 2 lands on 2, not on the VIP rule's 0; a missing partition is a 400 at once, not a 60 s wait) |
-| `events-consumer-a` / `-b` | 35 each | see below (consumer-b runs them on the KIP-848 protocol) |
+| `events-consumer-a` / `-b` | 42 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
 
-- `RetryRouterTest` (7, unit) — first hop → retry topic with `retry-attempt 1`, the header replaced not appended, out of attempts → DLT, non-recoverable → DLT at once, `RecoverableDataAccessException` found anywhere in the cause chain, a malformed header counts as no attempt, a re-driven record starts again at 1.
-- `RetryTopicIntegrationTest` (5) — a recoverable failure is forwarded once (no loop on `library-events`); a drain run saves the book once the database is back; a record that keeps failing gets one attempt per run and lands on the DLT with `retry-attempt 3` and the exception headers; non-Avro bytes on the retry topic go to the DLT unchanged; a failed forward commits nothing and the next run reads the record again.
+- `RetryRouterTest` (11, unit) — the real outage exception chains (JPA transaction can't start, no pool connection) and a query timeout are recoverable, a constraint violation is not; first hop → retry topic with `retry-attempt 1`, the header replaced not appended, out of attempts → DLT, non-recoverable → DLT at once, `RecoverableDataAccessException` found anywhere in the cause chain, a malformed header counts as no attempt, a re-driven record starts again at 1.
+- `RetryTopicIntegrationTest` (8) — a real outage (the Testcontainers database refusing connections) goes to the retry topic and is drained once the database is back; a record forwarded less than `app.retry.delay` ago waits for a later run; `max-run` is checked between records; a recoverable failure is forwarded once (no loop on `library-events`); a drain run saves the book once the database is back; a record that keeps failing gets one attempt per run and lands on the DLT with `retry-attempt 3` and the exception headers; non-Avro bytes on the retry topic go to the DLT unchanged; a failed forward commits nothing and the next run reads the record again.
 - `LibraryEventsConsumerIntegrationTest` — `@EmbeddedKafka`-backed. Publishes NEW/UPDATE events (built from readable JSON by the `AvroEvents` test helper) and checks the consumer spy, service spy and database state, including "update with unknown id is consumed but not persisted". Two tests read `library-events.DLT` back: an unknown-id update arrives as Avro with `IllegalArgumentException` in `kafka_dlt-exception-cause-fqcn`, and bytes that are not Avro arrive unchanged with `DeserializationException` — the listener never runs for them. `redeliveredRecord_isAppliedOnce` proves the idempotent consumer, and `coffeeOrder_isConsumed` sends a String-keyed `CoffeeOrder` and checks the coffee listener receives it typed. Five feature tests: `flakyCoffeeOrder_succeedsOnRetryTopic`, `failingCoffeeOrder_endsOnDlt` (4 attempts, then `coffee-orders-dlt`), `processedEvent_publishesLatestState` (compacted topic keyed by the DB id), `shareGroup_releasedOrderIsRedelivered` (delivery count 1 → RELEASE → delivery 2 → ACCEPT) and `replay_redeliversAndIsSkipped`. Base event and deterministic failures: `resentEvent_sameEventId_isAppliedOnce` (same eventId at a new offset → applied once), `newEventWithId_isDeadLettered_withoutRetry` and `duplicateBookId_isDeadLettered_withoutRetry` (DLT after exactly one attempt).
 - `LibraryEventsConsumerManualOffsetTest` — runs with the `manual-offset` profile, checks that only the manual listener is active, and that its `acknowledge()` commits the offset (read back with the Kafka `Admin` client).
 - `LibraryEventsConsumerContainerTest` — Testcontainers variant with a real `cp-kafka:8.3.2` broker.

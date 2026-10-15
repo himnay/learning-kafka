@@ -137,7 +137,7 @@ flowchart LR
         ConsumerA -->|"non-retryable /\nretries exhausted"| DLT[("library-events.DLT\n3 partitions")]
         ConsumerA -->|"JPA + processed_event\n(one DB transaction)"| PG[(PostgreSQL + Flyway)]
         ConsumerB --> PG
-        ConsumerA -.->|"RecoverableDataAccessException"| RT[("library-events.retry\nretry-attempt header")]
+        ConsumerA -.->|"transient failure\n(e.g. DB down)"| RT[("library-events.retry\nretry-attempt header")]
         RT -.->|"scheduled drain\n(app.retry.interval)"| ConsumerA
         T1 -->|"own consumer group"| KC["Kafka Connect :8083\nJDBC sink + Debezium outbox"]
         KC -->|"events (replica)"| PG
@@ -193,7 +193,7 @@ sequenceDiagram
     Note over Listener,Topic: Offset for the original record is committed —\nthe consumer moves on#59; the DLT holds the poison message for manual inspection/replay
 ```
 
-A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `RetryRouter` forwards the record to `library-events.retry` with a `retry-attempt` header, and the scheduled `RetryTopicDrainer` retries it every `app.retry.interval` until `app.retry.max-attempts`, then dead-letters it. See [kafka-core §14](kafka-core/README.md#14-error-handling-retries-recovery-dead-letter-topic) for the full retry/backoff timeline.
+A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `RetryRouter` forwards the record to `library-events.retry` with a `retry-attempt` header, and the scheduled `RetryTopicDrainer` retries it once it has waited `app.retry.delay` (runs every `app.retry.interval`) until `app.retry.max-attempts`, then dead-letters it. A real outage counts: Spring reports it as `CannotCreateTransactionException`, not `RecoverableDataAccessException`, and the retry rule matches the whole family of transient failures. See [kafka-core §14](kafka-core/README.md#14-error-handling-retries-recovery-dead-letter-topic) for the full retry/backoff timeline.
 
 ---
 
@@ -408,7 +408,7 @@ cd kafka-core && mvn test
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
 | `kafka-core/events-producer` | 47 — incl. the key-substring partitioner and VIP rule, the coffee outbox against a real PostgreSQL (logical decoding), key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
-| `kafka-core/events-consumer-a` / `-b` | 35 each (b on the KIP-848 protocol) — incl. the retry topic and its scheduled drain |
+| `kafka-core/events-consumer-a` / `-b` | 42 each (b on the KIP-848 protocol) — incl. the retry topic, a real database outage and the scheduled drain |
 | `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
 Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent's in-memory `mock://` Schema Registry. The kafka-core consumer tests need Docker: they run against a real PostgreSQL via Testcontainers, and `LibraryEventsConsumerContainerTest` also uses a real `cp-kafka:8.3.2` broker ([`ConfluentKafkaContainer`][ConfluentKafkaContainer]).
@@ -445,7 +445,7 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 - Publishes the latest state per id to the compacted topic `library-book-state` inside the Kafka transaction
 - Coffee orders: non-blocking retry topics (`@RetryableTopic` → `coffee-orders-retry-0/1/2` → `coffee-orders-dlt`) and a share group (`coffee-baristas`, KIP-932) on the same topic
 - consumer-b uses the KIP-848 group protocol in the same groups as classic consumer-a; replay API (`/v1/library-events/replay`) seeks owned partitions back
-- `DefaultAfterRollbackProcessor` with [`FixedBackOff`][FixedBackOff] (1 s delay, 2 retries — 3 attempts total); [`IllegalArgumentException`][IllegalArgumentException] and undeserializable records go straight to `library-events.DLT`; [`RecoverableDataAccessException`][RecoverableDataAccessException] goes to `library-events.retry`, retried by a scheduled drain job (`app.retry.*`) and dead-lettered after `max-attempts`
+- `DefaultAfterRollbackProcessor` with [`FixedBackOff`][FixedBackOff] (1 s delay, 2 retries — 3 attempts total); [`IllegalArgumentException`][IllegalArgumentException] and undeserializable records go straight to `library-events.DLT`; transient failures such as the database being down ([`RecoverableDataAccessException`][RecoverableDataAccessException], `CannotCreateTransactionException`, …) go to `library-events.retry`, retried by a scheduled drain job (`app.retry.*`) and dead-lettered after `max-attempts`
 - Deep dive: [`kafka-core/README.md`](kafka-core/README.md)
 
 </ul>

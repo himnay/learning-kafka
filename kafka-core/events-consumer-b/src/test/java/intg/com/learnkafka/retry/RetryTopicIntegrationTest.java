@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.RecoverableDataAccessException;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -35,7 +36,12 @@ import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,6 +54,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.times;
@@ -72,7 +79,10 @@ import static org.mockito.Mockito.verify;
         "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.properties.schema.registry.url=" + AvroEvents.REGISTRY,
-        "app.retry.interval=1h"
+        "app.retry.interval=1h",
+        "app.retry.delay=0s",       // this context's drainer retries at once; recordNotYetDue_... uses its own
+        // fail fast while the database is "down" (realDatabaseOutage_...): 3 attempts × 2 s, not × 30 s
+        "spring.datasource.hikari.connection-timeout=2000"
 })
 class RetryTopicIntegrationTest {
 
@@ -94,6 +104,12 @@ class RetryTopicIntegrationTest {
 
     @Autowired
     LibraryEventsRepository libraryEventsRepository;
+
+    @Autowired
+    PostgreSQLContainer postgres;
+
+    @Autowired
+    ConsumerFactory<Object, Object> consumerFactory;
 
     @MockitoSpyBean
     LibraryEventsService serviceSpy;
@@ -215,6 +231,103 @@ class RetryTopicIntegrationTest {
         awaitRecord(RETRY_TOPIC, r -> isEvent(event, RETRY_TOPIC, r) && headerValues(r, RetryRouter.ATTEMPT_HEADER).equals(List.of("2")));
     }
 
+    @Test
+    @DisplayName("A real database outage (no connections at all) sends the record to the retry topic; once the database is back a drain run saves it")
+    void realDatabaseOutage_goesToRetryTopic_andIsDrainedOnceTheDatabaseIsBack() throws Exception {
+        var event = newEvent(9105, "Retry-Db-Down");
+        blockDatabase();
+        try {
+            kafkaTemplate.executeInTransaction(t -> t.sendDefault(9105, event));
+            awaitRecord(RETRY_TOPIC, r -> isEvent(event, RETRY_TOPIC, r)
+                    && headerValues(r, RetryRouter.ATTEMPT_HEADER).equals(List.of("1")), Duration.ofSeconds(45));
+        } finally {
+            unblockDatabase();
+        }
+
+        drainer.drainOnce();
+
+        assertThat(libraryEventsRepository.findAll())
+                .anySatisfy(saved -> assertThat(saved.getBook().getBookName()).isEqualTo("Retry-Db-Down"));
+    }
+
+    @Test
+    @DisplayName("A record forwarded less than app.retry.delay ago is not retried yet; once the delay has passed it is")
+    void recordNotYetDue_waitsForALaterRun() {
+        var event = newEvent(9106, "Retry-Not-Due");
+        doThrow(new RecoverableDataAccessException("database down"))
+                .when(serviceSpy).processLibraryEvent(argThat(isBook("Retry-Not-Due")));
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(9106, event));
+        awaitRecord(RETRY_TOPIC, r -> isEvent(event, RETRY_TOPIC, r) && headerValues(r, RetryRouter.ATTEMPT_HEADER).equals(List.of("1")));
+        long before = callsFor("Retry-Not-Due");
+
+        var patientDrainer = drainerWith(Duration.ofHours(1), Duration.ofMinutes(1));   // delay 1 h
+        patientDrainer.drainOnce();
+        assertThat(callsFor("Retry-Not-Due")).as("forwarded seconds ago: not due").isEqualTo(before);
+
+        drainer.drainOnce();                                                             // delay 0 s
+        assertThat(callsFor("Retry-Not-Due")).isEqualTo(before + 1);
+    }
+
+    @Test
+    @DisplayName("max-run is checked between records: a slow batch stops at the deadline and the rest waits for the next run")
+    void maxRun_isCheckedBetweenRecords() {
+        doAnswer(invocation -> {
+            Thread.sleep(300);
+            return invocation.callRealMethod();
+        }).when(serviceSpy).processLibraryEvent(argThat(isBookPrefix("Retry-Slow-")));
+        kafkaTemplate.executeInTransaction(t -> {
+            for (int i = 1; i <= 5; i++) {
+                var record = new ProducerRecord<Integer, Object>(RETRY_TOPIC, 0, 9300 + i, newEvent(9300 + i, "Retry-Slow-" + i));
+                record.headers().add(RetryRouter.ATTEMPT_HEADER, "1".getBytes(UTF_8));
+                t.send(record);
+            }
+            return null;
+        });
+
+        drainerWith(Duration.ZERO, Duration.ofMillis(500)).drainOnce();
+
+        assertThat(callsForPrefix("Retry-Slow-")).as("slow records handled in one 500 ms run").isLessThanOrEqualTo(2);
+    }
+
+    /** A drainer on the same group and topic, with its own delay and max-run. */
+    private RetryTopicDrainer drainerWith(Duration delay, Duration maxRun) {
+        var properties = new RetryProperties(RETRY_TOPIC, "library-events-retry-group", Duration.ofHours(1), 3, maxRun, delay);
+        return new RetryTopicDrainer(consumerFactory, kafkaTemplate, serviceSpy, routerSpy, properties, "retry-test");
+    }
+
+    /** What a PostgreSQL outage looks like to the app: existing connections die, new ones are refused. */
+    private void blockDatabase() throws SQLException {
+        try (Connection admin = adminConnection(); Statement statement = admin.createStatement()) {
+            statement.execute("ALTER DATABASE \"" + postgres.getDatabaseName() + "\" ALLOW_CONNECTIONS false");
+            statement.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '"
+                    + postgres.getDatabaseName() + "' AND pid <> pg_backend_pid()");
+        }
+    }
+
+    private void unblockDatabase() throws SQLException {
+        try (Connection admin = adminConnection(); Statement statement = admin.createStatement()) {
+            statement.execute("ALTER DATABASE \"" + postgres.getDatabaseName() + "\" ALLOW_CONNECTIONS true");
+        }
+    }
+
+    /** A connection to the maintenance database, so the app's database can be closed and reopened. */
+    private Connection adminConnection() throws SQLException {
+        var url = "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getMappedPort(5432) + "/postgres";
+        return DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+    }
+
+    private long callsForPrefix(String prefix) {
+        var matcher = isBookPrefix(prefix);
+        return mockingDetails(serviceSpy).getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("processLibraryEvent"))
+                .filter(invocation -> matcher.matches(invocation.getArgument(0)))
+                .count();
+    }
+
+    private static ArgumentMatcher<ConsumerRecord<Integer, LibraryEventAvro>> isBookPrefix(String prefix) {
+        return r -> r != null && r.value() != null && r.value().getBook().getBookName().toString().startsWith(prefix);
+    }
+
     private long callsFor(String bookName) {
         var matcher = isBook(bookName);
         return mockingDetails(serviceSpy).getInvocations().stream()
@@ -255,10 +368,15 @@ class RetryTopicIntegrationTest {
 
     /** Reads the topic from the beginning until a record matches (15 s at most). */
     private ConsumerRecord<byte[], byte[]> awaitRecord(String topic, Predicate<ConsumerRecord<byte[], byte[]>> matches) {
+        return awaitRecord(topic, matches, Duration.ofSeconds(15));
+    }
+
+    private ConsumerRecord<byte[], byte[]> awaitRecord(String topic, Predicate<ConsumerRecord<byte[], byte[]>> matches,
+                                                       Duration timeout) {
         try (Consumer<byte[], byte[]> reader = newReader()) {
             reader.subscribe(List.of(topic));
             var found = new AtomicReference<ConsumerRecord<byte[], byte[]>>();
-            Awaitility.await().atMost(Duration.ofSeconds(15)).until(() -> {
+            Awaitility.await().atMost(timeout).until(() -> {
                 for (ConsumerRecord<byte[], byte[]> r : reader.poll(Duration.ofMillis(500))) {
                     if (found.get() == null && matchesSafely(matches, r)) {
                         found.set(r);

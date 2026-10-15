@@ -8,6 +8,7 @@ import com.learnkafka.service.LibraryEventsService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -34,9 +35,10 @@ import java.util.Set;
  *
  * One run, every app.retry.interval (fixed delay, so runs never overlap):
  *  1. a fresh consumer in its own group (app.retry.group-id) joins and gets its share of the partitions;
- *  2. it notes where every partition ends NOW and processes only records below that point. A record
- *     re-queued during the run lands above it and waits for the next run, so a record gets at most
- *     one attempt per run;
+ *  2. it notes where every partition ends NOW and processes only records below that point that have
+ *     waited app.retry.delay on the retry topic (record timestamp = forward time). A record re-queued
+ *     during the run, or forwarded too recently — e.g. by the other consumer app, whose schedule runs
+ *     independently — waits for a later run, so attempts are at least app.retry.delay apart;
  *  3. each record runs in a Kafka transaction with its offset. If processing fails, that transaction
  *     aborts (dropping a state record it may have sent) and a second one forwards the record through
  *     RetryRouter (retry topic with retry-attempt + 1, or the DLT) together with the offset.
@@ -110,10 +112,14 @@ public class RetryTopicDrainer {
         stopping = true;
     }
 
-    /** Pins the Avro reader class, as the main listener does (LibraryEventsConsumer.AVRO_READER_TYPE). */
+    /**
+     * Pins the Avro reader class, as the main listener does (LibraryEventsConsumer.AVRO_READER_TYPE), and
+     * fetches small batches: with the database down every record can take a connection timeout.
+     */
     private static Properties readerProperties() {
         var props = new Properties();
         props.setProperty("specific.avro.value.type", LibraryEventAvro.class.getName());
+        props.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "50");
         return props;
     }
 
@@ -149,6 +155,7 @@ public class RetryTopicDrainer {
             }
         }
 
+        long dueBefore = System.currentTimeMillis() - properties.delay().toMillis();   // forwarded before this → due
         long deadline = System.nanoTime() + properties.maxRun().toNanos();
         while (!active.isEmpty() && System.nanoTime() < deadline && !stopping) {
             for (ConsumerRecord<Object, Object> record : consumer.poll(POLL_TIMEOUT)) {
@@ -159,6 +166,13 @@ public class RetryTopicDrainer {
                 if (record.offset() >= end.get(tp)) {   // arrived during this run: next run's work
                     active.remove(tp);
                     continue;
+                }
+                if (record.timestamp() > dueBefore) {   // forwarded too recently: it and everything after it wait
+                    active.remove(tp);
+                    continue;
+                }
+                if (System.nanoTime() >= deadline) {    // max-run is checked per record, not per batch:
+                    return;                             // the rest is uncommitted and read again next run
                 }
                 handle(consumer, record, tally);
                 if (stopping) {

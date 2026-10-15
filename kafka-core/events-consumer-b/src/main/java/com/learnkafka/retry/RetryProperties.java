@@ -16,6 +16,9 @@ import java.time.Duration;
  * @param interval    fixed delay between two drain runs
  * @param maxAttempts processing attempts from the retry topic before a record goes to the DLT
  * @param maxRun      a single drain run never lasts longer than this
+ * @param delay       how long a record waits on the retry topic before it is retried; defaults to
+ *                    {@code interval}. Checked against the record's timestamp (the forward time), so it
+ *                    holds across both consumer apps, whose schedules run independently
  */
 @Validated
 @ConfigurationProperties("app.retry")
@@ -24,5 +27,13 @@ public record RetryProperties(
         @NotBlank String groupId,
         @NotNull Duration interval,
         @Min(1) int maxAttempts,
-        @NotNull Duration maxRun
-) {}
+        @NotNull Duration maxRun,
+        Duration delay
+) {
+
+    public RetryProperties {
+        if (delay == null) {
+            delay = interval;
+        }
+    }
+}

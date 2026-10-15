@@ -51,6 +51,10 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5435}/${POSTGRES_DB:library}
     username: ${POSTGRES_USER:library}
     password: ${POSTGRES_PASSWORD:library}
+    hikari:
+      # fail fast while PostgreSQL is down (default 30 s): 3 attempts take seconds, then the record
+      # moves on to the retry topic instead of stalling the listener past max.poll.interval.ms
+      connection-timeout: 5000
   jpa:
     open-in-view: false
     hibernate:
@@ -86,6 +90,7 @@ app:
     topic: library-events.retry
     group-id: library-events-retry-group   # the scheduled drain job's own consumer group
     interval: 30s       # fixed delay between two drain runs
+    delay: 30s          # a record is retried only after waiting this long on the retry topic (default: interval)
     max-attempts: 3     # processing attempts from the retry topic before the DLT
     max-run: 1m         # a single drain run never drains longer than this
 
