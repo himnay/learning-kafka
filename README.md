@@ -387,7 +387,7 @@ Prometheus (root compose, `localhost:9091`) scrapes `/actuator/prometheus` of th
 
 Every panel query was checked against live Prometheus data. The dashboard is a JSON file in `docker/grafana/provisioning/dashboards/` (read-only in the UI — edit the file).
 
-Import `insomnia-collection.json` into Insomnia to test all endpoints — library events, coffee orders, key routing, replay, Streams queries (incl. windows and the stores join), Schema Registry, Kafka Connect and actuator.
+Each module has its own Insomnia collection — import either or both: [`kafka-core/insomnia-collection.json`](kafka-core/insomnia-collection.json) (library events, coffee orders, key routing, replay, Schema Registry, Kafka Connect, actuator) and [`kafka-stream/insomnia-collection.json`](kafka-stream/insomnia-collection.json) (Streams queries incl. windows and the stores join, actuator).
 
 ---
 

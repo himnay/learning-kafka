@@ -271,7 +271,7 @@ curl 'localhost:8082/v1/orders/windows/count?from_time=2026-10-14T05:47:00&to_ti
 curl localhost:8082/v1/orders/count/all
 ```
 
-The repo's [`insomnia-collection.json`](../insomnia-collection.json) has all of these in its *Kafka Streams* folder. Example responses for each endpoint are in `orders-streams-app/src/main/resources/data/` (`01-orders-count.json` … `06-orders-revenue-windows.json`).
+This module's [`insomnia-collection.json`](insomnia-collection.json) has all of these in its *Kafka Streams* folder. Example responses for each endpoint are in `orders-streams-app/src/main/resources/data/` (`01-orders-count.json` … `06-orders-revenue-windows.json`).
 
 ---
 

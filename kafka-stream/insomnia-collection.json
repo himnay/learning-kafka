@@ -1,0 +1,142 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-10-15T00:00:00.000Z",
+  "__export_source": "learning-kafka",
+  "resources": [
+    {
+      "_id": "wrk_kafka_stream",
+      "_type": "workspace",
+      "name": "Learning Kafka — kafka-stream",
+      "description": "Interactive queries and actuator endpoints of orders-streams-app."
+    },
+    {
+      "_id": "fld_streams_queries",
+      "_type": "request_group",
+      "parentId": "wrk_kafka_stream",
+      "name": "Kafka Streams — interactive queries (:8082)",
+      "description": "Order counts and revenue per store from the orders-kafka-streams state stores. {orderType} = general | restaurant. 503 while Kafka Streams is starting or rebalancing."
+    },
+    {
+      "_id": "req_streams_count_general",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Count per store (general)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/count/general"
+    },
+    {
+      "_id": "req_streams_count_restaurant",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Count per store (restaurant)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/count/restaurant"
+    },
+    {
+      "_id": "req_streams_count_location",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Count for one store",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/count/general/location/store_1234"
+    },
+    {
+      "_id": "req_streams_count_location_404",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Count for an unknown store (404)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/count/general/location/store_9999"
+    },
+    {
+      "_id": "req_streams_count_all",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Count, all order types",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/count/all"
+    },
+    {
+      "_id": "req_streams_revenue_general",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Revenue per store (general)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/revenue/general"
+    },
+    {
+      "_id": "req_streams_revenue_location",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Revenue for one store",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/revenue/restaurant/location/store_1234"
+    },
+    {
+      "_id": "req_streams_revenue_with_address",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Revenue joined with store details",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/revenue/general/with-address",
+      "description": "KTable-KTable join of the revenue table with the stores table."
+    },
+    {
+      "_id": "req_streams_windows_count_general",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Windowed counts (general, 30 s windows)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/windows/count/general"
+    },
+    {
+      "_id": "req_streams_windows_count_all_range",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Windowed counts, all types, time range",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/windows/count?from_time=2026-10-14T05:47:00&to_time=2026-10-14T05:48:00",
+      "description": "Windows whose START is in [from_time, to_time], ISO local date-time in UTC."
+    },
+    {
+      "_id": "req_streams_windows_revenue",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Windowed revenue (restaurant)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/windows/revenue/restaurant"
+    },
+    {
+      "_id": "req_streams_bad_type",
+      "_type": "request",
+      "parentId": "fld_streams_queries",
+      "name": "GET — Unknown order type (400)",
+      "method": "GET",
+      "url": "http://localhost:8082/v1/orders/count/pizza"
+    },
+    {
+      "_id": "fld_streams",
+      "_type": "request_group",
+      "parentId": "wrk_kafka_stream",
+      "name": "Actuator — Orders Kafka Streams (8082)",
+      "description": "http://localhost:8082/actuator"
+    },
+    {
+      "_id": "req_health_streams",
+      "_type": "request",
+      "parentId": "fld_streams",
+      "name": "GET — Health",
+      "method": "GET",
+      "url": "http://localhost:8082/actuator/health"
+    },
+    {
+      "_id": "req_metrics_streams",
+      "_type": "request",
+      "parentId": "fld_streams",
+      "name": "GET — Prometheus Metrics",
+      "method": "GET",
+      "url": "http://localhost:8082/actuator/prometheus"
+    }
+  ]
+}

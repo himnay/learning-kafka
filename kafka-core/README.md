@@ -356,7 +356,7 @@ The other modes, for contrast. None is configured here; `BACKWARD` applies becau
 | `*_TRANSITIVE` variants | Same guarantee checked against *all* previous versions, not just the last one                  | Long-lived topics with many schema revisions |
 | `NONE`                  | No compatibility checking                                                                      | Registry is just a schema store |
 
-***Try it:*** add a new required field (no `default`) to `LibraryEvent.avsc`, rebuild `schemas`, and send with the producer against a registry that already has the current version. The registry rejects the registration with `409 Conflict` (incompatible schema), because a consumer reading old data with the new schema could not fill in that field. The repo's [`insomnia-collection.json`](../insomnia-collection.json) has a *Schema Registry* folder with requests to view and change a subject's compatibility.
+***Try it:*** add a new required field (no `default`) to `LibraryEvent.avsc`, rebuild `schemas`, and send with the producer against a registry that already has the current version. The registry rejects the registration with `409 Conflict` (incompatible schema), because a consumer reading old data with the new schema could not fill in that field. This module's [`insomnia-collection.json`](insomnia-collection.json) has a *Schema Registry* folder with requests to view and change a subject's compatibility.
 
 ---
 
@@ -881,7 +881,7 @@ curl -X POST localhost:8080/v1/coffee-orders -H 'Content-Type: application/json'
   -d '{"name": "Ada", "nickName": "Countess"}'
 ```
 
-- More ready-made requests (all PUT variants, DLT cases, coffee orders, Schema Registry, actuator) are in the repo's [`insomnia-collection.json`](../insomnia-collection.json).
+- More ready-made requests (all PUT variants, DLT cases, coffee orders, Schema Registry, actuator) are in this module's [`insomnia-collection.json`](insomnia-collection.json).
 - If port `8080` is already taken on your machine, start the producer with `--server.port=8090` (or `-Dspring-boot.run.arguments=--server.port=8090`).
 - The repo-root `docker-compose.yml` is this stack plus Prometheus (`9091`) and Grafana (`3001`) — not a second Kafka, so there is nothing to keep apart.
 
@@ -927,7 +927,7 @@ docker exec kafka-core-postgres psql -U library -d library \
 
 Try a failover: `docker stop kafka-core-kafka-2`, describe the topic again (new leaders, smaller ISR), then `docker start kafka-core-kafka-2`.
 
-The *Schema Registry* folder of [`insomnia-collection.json`](../insomnia-collection.json) has requests for subjects, versions, schemas by id and every compatibility level.
+The *Schema Registry* folder of [`insomnia-collection.json`](insomnia-collection.json) has requests for subjects, versions, schemas by id and every compatibility level.
 
 ---
 
@@ -1026,7 +1026,7 @@ The 2 unprocessed records were exactly the two the consumers had dead-lettered: 
 - ***At-least-once, made safe by the key*** — Connect commits its consumer offsets after writing; a crash replays records, and `upsert` on the Kafka coordinates absorbs the duplicates.
 - ***`events` is a replica, not the source of truth*** — the topic is. Retention still applies to the topic; the table keeps everything until you delete it.
 - ***Licensing*** — the Confluent JDBC connector uses the Confluent Community License (free to self-host, not Apache 2.0). Aiven's JDBC sink is an Apache-licensed alternative.
-- ***Managing it*** (REST on `localhost:8083`; also in the *Kafka Connect* folder of [`insomnia-collection.json`](../insomnia-collection.json)):
+- ***Managing it*** (REST on `localhost:8083`; also in the *Kafka Connect* folder of [`insomnia-collection.json`](insomnia-collection.json)):
 
 ```bash
 curl localhost:8083/connectors                                        # list
