@@ -38,6 +38,8 @@ Scope: `kafka-core/events-consumer-a` and `kafka-core/events-consumer-b` (identi
 
 The DLT record carries the final `retry-attempt` value, so you can tell "dead-lettered at once" (no header) from "dead-lettered after N retries".
 
+Only a record read from the retry topic counts its header: a record on `library-events` that already carries `retry-attempt` (re-driven from the DLT) starts again at 1.
+
 ### 3.3 Main listener (changed recoverer only)
 
 - In-place retries stay: `FixedBackOff(1 s, 2)` absorbs blips without leaving the partition.

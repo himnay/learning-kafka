@@ -90,7 +90,7 @@ Column names `id`, `aggregatetype`, `aggregateid`, `payload` are the Event Route
   "plugin.name": "pgoutput",
   "slot.name": "coffee_outbox_slot",
   "publication.name": "coffee_outbox_publication",
-  "publication.autocreate.mode": "filtered",
+  "publication.autocreate.mode": "all_tables",
   "table.include.list": "coffee.outbox_event",
   "snapshot.mode": "no_data",
   "tombstones.on.delete": "false",
@@ -110,6 +110,7 @@ Column names `id`, `aggregatetype`, `aggregateid`, `payload` are the Event Route
 
   - `BinaryDataConverter` writes the `payload` bytes unchanged → consumers' `KafkaAvroDeserializer` reads them exactly as today. Its JSON delegate only serves heartbeat records.
   - `heartbeat.interval.ms` keeps the replication slot's confirmed position moving while only other tables change, so PostgreSQL can recycle WAL.
+  - `publication.autocreate.mode=all_tables` — a `filtered` publication needs `coffee.outbox_event` to exist when the connector starts, but the producer's Flyway creates it only when the producer first runs, after compose has registered the connector. `table.include.list` still limits the events to the outbox table (same choice as the `learning-debezium-cdc` repo).
   - Option names (`snapshot.mode=no_data`, the `partition` placement) are re-checked against the 3.7 docs and a live run during implementation.
 - ***Topic*** — `kafka-init` creates `coffee-orders` (3 partitions, RF 3) so it exists with enough partitions before Debezium writes `partition_no`.
 
