@@ -354,6 +354,14 @@ Response `201 Created`: the order's id, name, status, ordered time and its `meta
 
 Response `201 Created`: `{"key": "order-VIP-1001", "matchedSubstring": "VIP", "partition": 0, "offset": 0}`. `KeySubstringPartitioner` sends every key containing a configured substring to one partition (`VIP` → 0, `UK` → 1, `US` → 2); other keys are hashed like Kafka's default — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression).
 
+### <span style="color:hsl(357,80%,58%)">POST /v1/key-routing/partitions/{partition} — Send a record to a partition you choose</span>
+
+```json
+{ "key": "order-VIP-1002", "message": "pinned by the caller" }
+```
+
+Response `201 Created` for `/partitions/2`: `{"key": "order-VIP-1002", "matchedSubstring": null, "partition": 2, "offset": 0}`. An explicit partition skips the partitioner, so even a VIP key lands where you said. A partition the topic doesn't have returns `400` — see [kafka-core §9](kafka-core/README.md#9-producers).
+
 ---
 
 <a id="observability"></a>
@@ -397,7 +405,7 @@ cd kafka-core && mvn test
 | Module | Tests |
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
-| `kafka-core/events-producer` | 31 — incl. both partitioners, key routing end to end, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
+| `kafka-core/events-producer` | 36 — incl. both partitioners, key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
 | `kafka-core/events-consumer-a` / `-b` | 23 each (b on the KIP-848 protocol) |
 | `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
@@ -412,7 +420,7 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 
 <ul>
 
-- REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`, `POST /v1/coffee-orders`, `POST /v1/key-routing`
+- REST endpoints: `POST /v1/libraryevent`, `PUT /v1/libraryevent`, `POST /v1/coffee-orders`, `POST /v1/key-routing`, `POST /v1/key-routing/partitions/{partition}`
 - Custom partitioners, each on its own template: `CoffeeVipPartitioner` (VIP customers → partition 0) and `KeySubstringPartitioner` (keys sharing a substring → one partition)
 - `zstd` compression of every batch before it is sent, with `linger.ms=20` so batches fill
 - Publishes Avro via Confluent [`KafkaAvroSerializer`][KafkaAvroSerializer]; schemas registered automatically to `http://localhost:8085`

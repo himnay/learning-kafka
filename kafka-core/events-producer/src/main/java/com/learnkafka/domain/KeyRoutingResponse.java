@@ -2,7 +2,7 @@ package com.learnkafka.domain;
 
 /**
  * Where a key-routing record landed. {@code matchedSubstring} is the rule that routed it, or null
- * when no substring matched and the whole key was hashed.
+ * when no substring matched and the whole key was hashed, or when the caller picked the partition.
  */
 public record KeyRoutingResponse(
         String key,

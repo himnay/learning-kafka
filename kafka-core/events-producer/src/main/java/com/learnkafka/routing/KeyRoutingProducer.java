@@ -12,8 +12,10 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +32,7 @@ import java.util.concurrent.TimeoutException;
  * REST endpoint that publishes plain-text messages to key-routing with a key chosen by the caller.
  * Its template uses KeySubstringPartitioner, so every key containing a configured substring
  * (app.key-routing.substring-partitions) lands on the same partition. The response says which one.
+ * POST /partitions/{partition} skips the partitioner and sends to the partition the caller names.
  *
  * Like CoffeeOrdersProducer, it builds its own String/String KafkaTemplate from Boot's producer
  * factory: a second KafkaTemplate bean would make Boot's auto-configured one back off. Everything
@@ -93,5 +96,28 @@ public class KeyRoutingProducer {
         log.info("Routed key={} (substring={}) to partition={} offset={}",
                 request.key(), substring, metadata.partition(), metadata.offset());
         return new KeyRoutingResponse(request.key(), substring, metadata.partition(), metadata.offset());
+    }
+
+    /**
+     * Publishes the message to the partition the caller names. A record that carries a partition
+     * never reaches the partitioner, so the key only travels with the record: KeySubstringPartitioner
+     * is skipped and matchedSubstring is null. A partition the topic doesn't have is a 400 here;
+     * send() itself would block for max.block.ms (60 s) waiting for it to appear, then time out.
+     */
+    @PostMapping("/partitions/{partition}")
+    public ResponseEntity<?> publishToPartition(@PathVariable int partition, @RequestBody @Valid KeyRoutingRequest request)
+            throws ExecutionException, InterruptedException, TimeoutException {
+        int partitions = kafkaTemplate.partitionsFor(TOPIC).size();
+        if (partition < 0 || partition >= partitions) {
+            var error = "Partition %d does not exist: topic %s has partitions 0-%d".formatted(partition, TOPIC, partitions - 1);
+            log.warn(error);
+            return ResponseEntity.badRequest().body(error);
+        }
+        var metadata = kafkaTemplate.send(TOPIC, partition, request.key(), request.message())
+                .get(10, TimeUnit.SECONDS)
+                .getRecordMetadata();
+        log.info("Sent key={} to requested partition={} offset={}", request.key(), metadata.partition(), metadata.offset());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new KeyRoutingResponse(request.key(), null, metadata.partition(), metadata.offset()));
     }
 }

@@ -415,6 +415,11 @@ kafkaTemplate.send(TOPIC, order.getId().toString(), order)        // key = order
 - ***Rules checked at startup*** — the controller parses `app.key-routing.substring-partitions` itself, so a malformed rule stops the app instead of failing the first send.
 - ***Why a separate topic*** — the other keys can't show substring routing: library events are keyed by an Integer id (`null` for NEW) and coffee orders by a random UUID.
 
+`POST /v1/key-routing/partitions/{partition}` sends the same request to the partition ***the caller names***, with [`KafkaTemplate.send(topic, partition, key, value)`][KafkaTemplate]:
+
+- ***The partitioner is skipped*** — a record that carries a partition never reaches `partitioner.class`, so `KeySubstringPartitioner` doesn't run: a VIP key sent to `/partitions/2` lands on 2, not 0. The key still travels with the record, and the response's `matchedSubstring` is `null`.
+- ***Checked before sending*** — a partition the topic doesn't have gets `400 Partition 7 does not exist: topic key-routing has partitions 0-2`, checked against `partitionsFor()`. `send()` itself would block for `max.block.ms` (60 s) waiting for that partition, then fail ([§25](#25-custom-partitioner-and-compression)).
+
 ---
 
 <a id="10-consumers"></a>
@@ -706,6 +711,29 @@ public void onMessage(ConsumerRecord<Integer, LibraryEventAvro> consumerRecord,
 The `manualAckContainerFactory` bean in `LibraryEventsConsumerConfig` is the default factory's setup (including the Kafka transaction manager) plus `AckMode.MANUAL_IMMEDIATE`. Without it the container would run in the default `BATCH` mode, where Spring Kafka has no `Acknowledgment` to pass and every record fails.
 
 With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IMMEDIATE`, the framework will *not* commit an offset unless the listener calls `acknowledgment.acknowledge()` itself. This is the building block for "commit only after I'm certain the side effect succeeded". The default listener gets the same effect implicitly, since its offset is committed in the Kafka transaction only after the listener returns. The manual variant makes the commit point an explicit line of code, which matters once processing spans more than one listener invocation (e.g. batching, or committing after a separate async step).
+
+### <span style="color:hsl(221,80%,58%)">Ack modes: when does the container commit?</span>
+
+[`ContainerProperties.AckMode`][AckMode] decides when the listener container commits the offsets of the records it has processed (Spring Kafka 4.1, as of 2026). It only applies while Kafka's own auto-commit is off: with `enable.auto.commit=true` the consumer commits on its own every `auto.commit.interval.ms`, and the ack mode is ignored. Spring Kafka turns auto-commit off unless you set it.
+
+| Ack mode | The container commits… | Listener gets | Trade-off |
+|---|---|---|---|
+| `BATCH` (default) | once every record from one `poll()` has been processed | the record | fewest commits; a crash replays the rest of that poll |
+| `RECORD` | after each record | the record | one commit per record: slower, smallest replay window |
+| `TIME` | the pending offsets, once `ackTime` (default 5 s) has passed | the record | caps the commit rate by time |
+| `COUNT` | the pending offsets, once `ackCount` (default 1) records are pending | the record | caps the commit rate by count |
+| `COUNT_TIME` | whichever of `ackCount` / `ackTime` comes first | the record | both caps |
+| `MANUAL` | only what the listener acknowledged, queued until every record from the poll has been processed | the record + [`Acknowledgment`][Acknowledgment] | the listener decides what counts as done; still one commit per poll |
+| `MANUAL_IMMEDIATE` | at once, when the listener calls `acknowledge()` on the consumer thread (from another thread it is queued like `MANUAL`) | the record + `Acknowledgment` | the commit point is a line of code; one commit per ack |
+
+- ***Commits are synchronous*** (`commitSync`) by default; `ContainerProperties.setSyncCommits(false)` switches to `commitAsync`.
+- ***An offset is a position, not a per-record flag*** — committing record 8 means "resume at 9", so it also covers an unacknowledged record 7 on the same partition. Not acknowledging a record does not by itself bring it back.
+- ***`nack(Duration)`*** (manual modes, record listener) is the opposite of `acknowledge()`: nothing is committed, the rest of the poll is discarded, and the container seeks back so this record is delivered again after the sleep. The whole listener pauses for that sleep (at least `pollTimeout`, 5 s), not just the record's partition.
+
+***Inside a Kafka transaction*** (both consumer apps, [§12](#12-kafka-transactions)) the ack mode hardly matters. After the listener returns, the container sends the record's offset to ***the record's transaction*** (`sendOffsetsToTransaction`), so the offset commits or aborts together with whatever the listener published. Checked in the spring-kafka 4.1.1 source (`ackCurrent()` takes the transaction branch before it looks at the ack mode):
+
+- `BATCH`, `RECORD`, `TIME`, `COUNT`, `COUNT_TIME` and even `MANUAL` — the offset joins the transaction when the listener returns, whether or not it called `acknowledge()`.
+- `MANUAL_IMMEDIATE` — the offset joins the transaction only when the listener calls `acknowledge()`. That is why `manualAckContainerFactory` uses it: the commit point stays the explicit line in `LibraryEventsConsumerManualOffset`.
 
 ---
 
@@ -1132,6 +1160,7 @@ return Utils.toPositive(Utils.murmur2(keyBytes)) % numPartitions;   // no match:
 - ***Pinning doesn't reserve*** — unmatched keys can still hash onto partition 0 (`CoffeeVipPartitioner` shows how to reserve one). A busy substring also caps its throughput at one consumer.
 - ***Mistakes fail loudly*** — a malformed rule (`VIP=x`, `=1`, `VIP=-1`) stops the app at startup with a `ConfigException`. A pinned partition the topic doesn't have (`VIP=5` on 3 partitions) fails the send with `Rule VIP=5 needs partition 5, but topic key-routing has 3 partitions`. Kafka doesn't check this itself: the record would wait for a partition that never appears, then time out after `delivery.timeout.ms` (2 minutes).
 - ***Keyless records*** get a random partition: a custom partitioner can't hand them back to Kafka's sticky logic (returning `-1` is an error).
+- ***An explicit partition beats every partitioner*** — a record sent with a partition number (`POST /v1/key-routing/partitions/{partition}`, [§9](#9-producers)) never reaches `partitioner.class`. The producer checks that partition up front instead: one the topic doesn't have makes `send()` block for `max.block.ms` (60 s), then fail with `Partition 7 of topic key-routing with partition count 3 is not present in metadata after 60000 ms.` A partitioner that returns such a partition fails later and slower, after `delivery.timeout.ms` (see ***Mistakes fail loudly***).
 
 Try it with the Insomnia folder ***Kafka Core — Key routing***: `POST /v1/key-routing` with `{"key": "...", "message": "..."}`. Real run on the 3-broker cluster:
 
@@ -1385,7 +1414,7 @@ No Schema Registry container is needed: tests point `schema.registry.url` at ***
 | Module | Tests | What they cover |
 |---|---|---|
 | `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
-| `events-producer` | 31 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersProducerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key) |
+| `events-producer` | 36 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersProducerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key; for an explicit partition, 201 from that partition and 400 for partitions 3 and -1); `ExplicitPartitionIntegrationTest` (a VIP key sent to partition 2 lands on 2, not on the VIP rule's 0; a missing partition is a 400 at once, not a 60 s wait) |
 | `events-consumer-a` / `-b` | 23 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
@@ -1402,7 +1431,9 @@ cd kafka-core && mvn -T 4 clean install         # all four modules (82 tests)
 
 <!-- Library classes mentioned above, linked to their source at the versions this project builds with. -->
 
+[AckMode]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/ContainerProperties.java
 [AcknowledgingMessageListener]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/listener/AcknowledgingMessageListener.java
+[Acknowledgment]: https://github.com/spring-projects/spring-kafka/blob/v4.1.1/spring-kafka/src/main/java/org/springframework/kafka/support/Acknowledgment.java
 [BackOff]: https://github.com/spring-projects/spring-framework/blob/v7.0.9/spring-core/src/main/java/org/springframework/util/backoff/BackOff.java
 [BigDecimal]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/math/BigDecimal.java
 [CharSequence]: https://github.com/openjdk/jdk/blob/jdk-27-ga/src/java.base/share/classes/java/lang/CharSequence.java

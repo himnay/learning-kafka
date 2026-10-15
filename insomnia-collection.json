@@ -416,6 +416,44 @@
       }
     },
     {
+      "_id": "req_route_explicit",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — explicit partition 2 for a VIP key (partitioner skipped → partition 2)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing/partitions/2",
+      "description": "An explicit partition never reaches KeySubstringPartitioner: the VIP key lands on 2, not 0; matchedSubstring is null.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"order-VIP-1002\",\n  \"message\": \"pinned by the caller\"\n}"
+      }
+    },
+    {
+      "_id": "req_route_explicit_missing",
+      "_type": "request",
+      "parentId": "fld_key_routing",
+      "name": "POST — partition 7 does not exist (→ 400)",
+      "method": "POST",
+      "url": "http://localhost:8080/v1/key-routing/partitions/7",
+      "description": "Checked against partitionsFor() before sending; send() itself would block for max.block.ms (60 s), then time out.",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"key\": \"order-1\",\n  \"message\": \"nowhere to go\"\n}"
+      }
+    },
+    {
       "_id": "fld_schema_registry",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
