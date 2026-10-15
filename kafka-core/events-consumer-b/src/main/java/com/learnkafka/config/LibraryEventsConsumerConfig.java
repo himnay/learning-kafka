@@ -1,14 +1,14 @@
 package com.learnkafka.config;
 
 import com.learnkafka.event.EventMetadataMdcInterceptor;
+import com.learnkafka.retry.RetryProperties;
+import com.learnkafka.retry.RetryRouter;
 import com.learnkafka.service.LibraryEventsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.springframework.boot.kafka.autoconfigure.DefaultKafkaProducerFactoryCustomizer;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +16,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.RecoverableDataAccessException;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.TopicBuilder;
@@ -24,8 +23,6 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ContainerProperties.AckMode;
-import org.springframework.kafka.listener.ConsumerRecordRecoverer;
-import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultAfterRollbackProcessor;
 import org.springframework.kafka.support.serializer.DelegatingByTypeSerializer;
 import org.springframework.kafka.transaction.KafkaTransactionManager;
@@ -42,17 +39,18 @@ import java.util.Map;
  * Transactions (exactly-once from Kafka's side, idempotent on the database side):
  *   - The container starts a KAFKA transaction per record (KafkaTransactionManager);
  *     the consumed offset is committed inside it (sendOffsetsToTransaction), together with
- *     anything published to Kafka while processing (DLT, recovery re-publish).
+ *     anything published to Kafka while processing (state topic, retry topic, DLT).
  *   - The service runs its own DATABASE transaction (JpaTransactionManager, @Primary).
  *     It commits first; the Kafka transaction commits after the listener returns.
  *     If the Kafka commit then fails, the record is redelivered and the
  *     processed_event table (idempotent consumer) skips it.
  *   - Failures roll the Kafka transaction back; the AfterRollbackProcessor retries the
- *     record, then recovers it (DLT / re-publish) and commits its offset in a new transaction.
+ *     record, then recovers it (retry topic / DLT, see RetryRouter) and commits its offset in a
+ *     new transaction. RetryTopicDrainer retries what lands on the retry topic.
  *
  * GoF patterns applied:
- *   - Strategy      : pluggable ConsumerRecordRecoverer injected into the AfterRollbackProcessor
- *   - Template Method : recoverer branches on exception type (recoverable vs non-recoverable)
+ *   - Strategy      : pluggable recoverer (RetryRouter) injected into the AfterRollbackProcessor
+ *   - Template Method : RetryRouter branches on exception type and attempt count
  *   - Factory Method  : @Bean creates the ConcurrentKafkaListenerContainerFactory
  */
 @Slf4j
@@ -66,7 +64,7 @@ public class LibraryEventsConsumerConfig {
     /** Container factory for listeners that commit offsets themselves. */
     public static final String MANUAL_ACK_CONTAINER_FACTORY = "manualAckContainerFactory";
 
-    private final LibraryEventsService libraryEventsService;
+    private final RetryProperties retryProperties;
     private final KafkaTemplate<Integer, Object> kafkaTemplate;
     private final KafkaTransactionManager<?, ?> kafkaTransactionManager;
 
@@ -87,7 +85,7 @@ public class LibraryEventsConsumerConfig {
     }
 
     /**
-     * Value serializer for everything this app publishes (DLT, recovery re-publish), chosen by type:
+     * Value serializer for everything this app publishes (state topic, retry topic, DLT), chosen by type:
      *  - Avro records (SpecificRecord) → KafkaAvroSerializer, schema registered in Schema Registry
      *  - byte[]                       → ByteArraySerializer: a record that failed Avro
      *                                   deserialization is dead-lettered with its original bytes
@@ -140,12 +138,12 @@ public class LibraryEventsConsumerConfig {
      * decides what happens after a failed record rolls the transaction back.
      * - FixedBackOff: 1 s delay, 2 retries (3 total attempts)
      * - IllegalArgumentException and DataIntegrityViolationException are not retried — straight to the recoverer
-     * - commitRecovered=true: the recoverer's sends (DLT / re-publish) and the recovered
+     * - commitRecovered=true: the recoverer's send (retry topic / DLT) and the recovered
      *   record's offset commit in ONE new Kafka transaction, so it is never reprocessed
      */
     private DefaultAfterRollbackProcessor<Object, Object> afterRollbackProcessor() {
         var backOff = new FixedBackOff(1_000L, 2);
-        var processor = new DefaultAfterRollbackProcessor<>(recoverer(), backOff, kafkaTemplate, true);
+        var processor = new DefaultAfterRollbackProcessor<>(retryRouter(), backOff, kafkaTemplate, true);
         // Deterministic failures never succeed on a retry: invalid events, and constraint violations
         // such as a NEW event for a book_id that already exists
         processor.addNotRetryableExceptions(IllegalArgumentException.class, DataIntegrityViolationException.class);
@@ -153,42 +151,18 @@ public class LibraryEventsConsumerConfig {
     }
 
     /**
-     * Strategy pattern: recovery behaviour selected by root exception type.
-     *  - RecoverableDataAccessException → re-publish the event for later reprocessing
-     *  - All other exceptions            → route to DLT via DeadLetterPublishingRecoverer
+     * The retry rule (shared with RetryTopicDrainer): RecoverableDataAccessException → library-events.retry
+     * with retry-attempt 1; anything else → DLT. A record keeps its partition number either way.
      */
-    private ConsumerRecordRecoverer recoverer() {
-        var dltRecoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
-                (record, ex) -> {
-                    log.error("Routing to DLT: key={} cause={}", record.key(), ex.getMessage());
-                    return new TopicPartition(DLT_TOPIC, record.partition());
-                });
-
-        return (record, ex) -> {
-            // The listener's exception arrives wrapped (ListenerExecutionFailedException, possibly
-            // more layers from the transaction proxy), so search the whole cause chain
-            if (hasCause(ex, RecoverableDataAccessException.class)) {
-                log.info("Recoverable exception — re-publishing record: key={}", record.key());
-                libraryEventsService.handleRecovery((ConsumerRecord<Integer, ?>) record)
-                        .whenComplete((result, throwable) -> {
-                            if (throwable != null) {
-                                log.error("Recovery re-publish failed: key={}", record.key(), throwable);
-                            }
-                        });
-            } else {
-                log.error("Non-recoverable exception — routing to DLT: key={}", record.key(), ex);
-                dltRecoverer.accept(record, ex);
-            }
-        };
+    @Bean
+    public RetryRouter retryRouter() {
+        return new RetryRouter(kafkaTemplate, retryProperties, DLT_TOPIC);
     }
 
-    private static boolean hasCause(Throwable ex, Class<? extends Throwable> type) {
-        for (Throwable t = ex; t != null; t = t.getCause() == t ? null : t.getCause()) {
-            if (type.isInstance(t)) {
-                return true;
-            }
-        }
-        return false;
+    /** Retry topic: same partition count as library-events, so a forwarded record keeps its partition. */
+    @Bean
+    public NewTopic libraryEventsRetry() {
+        return TopicBuilder.name(retryProperties.topic()).partitions(3).build();   // RF: broker default
     }
 
     /** Defines the library events dlt bean. */

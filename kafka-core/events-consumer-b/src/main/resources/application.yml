@@ -80,4 +80,13 @@ info:
     description: Kafka consumer (KIP-848 group protocol) — Avro library events into PostgreSQL, plus coffee orders
     version: 0.0.1-SNAPSHOT
 
+app:
+  retry:
+    # Recoverable failures (RecoverableDataAccessException) wait here instead of being re-published
+    topic: library-events.retry
+    group-id: library-events-retry-group   # the scheduled drain job's own consumer group
+    interval: 30s       # fixed delay between two drain runs
+    max-attempts: 3     # processing attempts from the retry topic before the DLT
+    max-run: 1m         # a single drain run never drains longer than this
+
 # Logging: see logback-spring.xml

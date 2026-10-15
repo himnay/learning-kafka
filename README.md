@@ -74,7 +74,7 @@ Kafka does not track "read" vs "unread" the way a queue does. Instead, each **co
 
 <ul>
 
-- `events-consumer-a` / `-b` commit offsets ***inside a Kafka transaction***: Kafka's own `enable.auto.commit` is off, and the listener container sends each consumed offset with `sendOffsetsToTransaction` after the listener returns, atomically with anything the record caused to be published (DLT, re-publish). A record that throws rolls the transaction back and is retried or recovered by the `AfterRollbackProcessor`.
+- `events-consumer-a` / `-b` commit offsets ***inside a Kafka transaction***: Kafka's own `enable.auto.commit` is off, and the listener container sends each consumed offset with `sendOffsetsToTransaction` after the listener returns, atomically with anything the record caused to be published (state topic, retry topic, DLT). A record that throws rolls the transaction back and is retried or recovered by the `AfterRollbackProcessor`.
 - `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile, which switches the default listener off) demonstrates the alternative: [`AcknowledgingMessageListener`][AcknowledgingMessageListener] with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
 
 </ul>
@@ -106,7 +106,7 @@ What this codebase guarantees:
 <ul>
 
 - `events-producer` sets `acks: all` (wait for all in-sync replicas) with `enable.idempotence: true` and `retries: 10` — *producer-side* sends are idempotent (no duplicate writes from producer retries) and durable.
-- `events-consumer-a` / `-b` use ***Kafka transactions*** (offset + DLT/re-publish commit atomically) plus an ***idempotent consumer***: the `processed_event` table in PostgreSQL records `(group, topic, partition, offset)` and the base event's `eventId` in the same database transaction as the business write. Delivery is still at-least-once (a crash between the DB commit and the Kafka commit redelivers the record), but the redelivery is skipped, so each record changes the database ***effectively exactly once***. Details: [`kafka-core/README.md`](kafka-core/README.md) §12–§16.
+- `events-consumer-a` / `-b` use ***Kafka transactions*** (offset + retry-topic/DLT forward commit atomically) plus an ***idempotent consumer***: the `processed_event` table in PostgreSQL records `(group, topic, partition, offset)` and the base event's `eventId` in the same database transaction as the business write. Delivery is still at-least-once (a crash between the DB commit and the Kafka commit redelivers the record), but the redelivery is skipped, so each record changes the database ***effectively exactly once***. Details: [`kafka-core/README.md`](kafka-core/README.md) §12–§16.
 - Kafka Streams uses `processing.guarantee=at_least_once` by default (not overridden anywhere in `OrdersStreamsConfiguration`), so the count/revenue aggregations can, in rare failure-and-reprocessing scenarios, double-count a record. Enabling exactly-once semantics for the streams app would mean setting `processing.guarantee=exactly_once_v2`, which turns on transactional writes to the state-store changelog topics and the output topics together.
 
 </ul>
@@ -136,7 +136,8 @@ flowchart LR
         ConsumerA -->|"non-retryable /\nretries exhausted"| DLT[("library-events.DLT\n3 partitions")]
         ConsumerA -->|"JPA + processed_event\n(one DB transaction)"| PG[(PostgreSQL + Flyway)]
         ConsumerB --> PG
-        ConsumerA -.->|"RecoverableDataAccessException\n→ re-publish"| T1
+        ConsumerA -.->|"RecoverableDataAccessException"| RT[("library-events.retry\nretry-attempt header")]
+        RT -.->|"scheduled drain\n(app.retry.interval)"| ConsumerA
         T1 -->|"own consumer group"| KC["Kafka Connect\nJDBC sink :8083"]
         KC -->|"events (replica)"| PG
     end
@@ -191,7 +192,7 @@ sequenceDiagram
     Note over Listener,Topic: Offset for the original record is committed —\nthe consumer moves on#59; the DLT holds the poison message for manual inspection/replay
 ```
 
-A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `LibraryEventsConsumerConfig.recoverer()` calls `LibraryEventsService.handleRecovery()`, which re-publishes the same key/value back onto `library-events` for another pass through the whole pipeline. See `kafka-core/README.md` for the full retry/backoff timeline.
+A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `RetryRouter` forwards the record to `library-events.retry` with a `retry-attempt` header, and the scheduled `RetryTopicDrainer` retries it every `app.retry.interval` until `app.retry.max-attempts`, then dead-letters it. See [kafka-core §14](kafka-core/README.md#14-error-handling-retries-recovery-dead-letter-topic) for the full retry/backoff timeline.
 
 ---
 
@@ -232,7 +233,7 @@ A second path exists for **recoverable** failures ([`RecoverableDataAccessExcept
 ### <span style="color:hsl(19,80%,58%)">Behavioural</span>
 | Pattern             | Where                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 |---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Strategy**        | [`ConsumerRecordRecoverer`][ConsumerRecordRecoverer] in `LibraryEventsConsumerConfig.recoverer()` — swappable recovery (re-publish vs log-and-discard). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type. |
+| **Strategy**        | `RetryRouter` ([`ConsumerRecordRecoverer`][ConsumerRecordRecoverer]) in the `AfterRollbackProcessor` — swappable recovery (retry topic vs DLT). `OrdersStreamsConfiguration` uses a log-and-skip deserialization recoverer whose exception-response strategy (`REPLACE_THREAD` vs `SHUTDOWN_APPLICATION`) is chosen per exception type in `StreamsProcessorCustomErrorHandler`. `OrderStoreService.countStoreName/revenueStoreName` selects the state store per order type.         |
 | **Template Method** | `LibraryEventsService.processLibraryEvent()` defines the algorithm skeleton; `save()` and `validate()` are the concrete steps dispatched by event type via a switch expression. `OrdersTopology.aggregateOrdersCountAndRevenue()` is the reusable skeleton for both GENERAL and RESTAURANT branches.                                                                                                                                                                                |
 | **Observer**        | `LibraryEventsConsumer` annotated with [`@KafkaListener`][KafkaListener] — Spring Kafka registers it as an observer that reacts to each Kafka record                                                                                                                                                                                                                                                                                                                                |
 
@@ -406,7 +407,7 @@ cd kafka-core && mvn test
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
 | `kafka-core/events-producer` | 36 — incl. both partitioners, key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
-| `kafka-core/events-consumer-a` / `-b` | 23 each (b on the KIP-848 protocol) |
+| `kafka-core/events-consumer-a` / `-b` | 35 each (b on the KIP-848 protocol) — incl. the retry topic and its scheduled drain |
 | `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
 Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent's in-memory `mock://` Schema Registry. The kafka-core consumer tests need Docker: they run against a real PostgreSQL via Testcontainers, and `LibraryEventsConsumerContainerTest` also uses a real `cp-kafka:8.3.2` broker ([`ConfluentKafkaContainer`][ConfluentKafkaContainer]).
@@ -442,7 +443,7 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 - Publishes the latest state per id to the compacted topic `library-book-state` inside the Kafka transaction
 - Coffee orders: non-blocking retry topics (`@RetryableTopic` → `coffee-orders-retry-0/1/2` → `coffee-orders-dlt`) and a share group (`coffee-baristas`, KIP-932) on the same topic
 - consumer-b uses the KIP-848 group protocol in the same groups as classic consumer-a; replay API (`/v1/library-events/replay`) seeks owned partitions back
-- `DefaultAfterRollbackProcessor` with [`FixedBackOff`][FixedBackOff] (1 s delay, 2 retries — 3 attempts total); [`IllegalArgumentException`][IllegalArgumentException] and undeserializable records go straight to `library-events.DLT`; [`RecoverableDataAccessException`][RecoverableDataAccessException] triggers recovery by re-publishing the event
+- `DefaultAfterRollbackProcessor` with [`FixedBackOff`][FixedBackOff] (1 s delay, 2 retries — 3 attempts total); [`IllegalArgumentException`][IllegalArgumentException] and undeserializable records go straight to `library-events.DLT`; [`RecoverableDataAccessException`][RecoverableDataAccessException] goes to `library-events.retry`, retried by a scheduled drain job (`app.retry.*`) and dead-lettered after `max-attempts`
 - Deep dive: [`kafka-core/README.md`](kafka-core/README.md)
 
 </ul>
