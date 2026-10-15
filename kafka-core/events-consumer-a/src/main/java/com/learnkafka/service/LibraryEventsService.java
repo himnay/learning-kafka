@@ -13,11 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.concurrent.CompletableFuture;
 
 /**
  * GoF Template Method: processLibraryEvent() defines the algorithm skeleton;
@@ -101,19 +98,5 @@ public class LibraryEventsService {
      */
     private void publishLatestState(LibraryEvent saved) {
         kafkaTemplate.send(STATE_TOPIC, saved.getLibraryEventId(), LibraryEventEntityMapper.toAvro(saved));
-    }
-
-    /** Handles recovery. */
-    public CompletableFuture<SendResult<Integer, Object>> handleRecovery(
-            ConsumerRecord<Integer, ?> record) {
-        return kafkaTemplate.sendDefault(record.key(), record.value())
-                .whenComplete((result, ex) -> {
-                    if (ex != null) {
-                        log.error("Recovery re-publish failed for key={} : {}", record.key(), ex.getMessage(), ex);
-                    } else {
-                        log.info("Recovery re-published key={} to partition={}", record.key(),
-                                result.getRecordMetadata().partition());
-                    }
-                });
     }
 }

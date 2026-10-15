@@ -102,7 +102,7 @@ services:
     command:
       - |
         # key-routing: String keys routed by KeySubstringPartitioner (producer app)
-        for t in library-events library-events.DLT key-routing; do
+        for t in library-events library-events.retry library-events.DLT key-routing; do
           kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists \
             --topic "$$t" --partitions 3 --replication-factor 3 --config min.insync.replicas=2
         done

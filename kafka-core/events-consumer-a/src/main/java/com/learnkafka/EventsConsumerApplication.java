@@ -2,8 +2,12 @@ package com.learnkafka;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling            // RetryTopicDrainer
+@ConfigurationPropertiesScan // RetryProperties (app.retry.*)
 class EventsConsumerApplication {
 
 	/** Application entry point. */
