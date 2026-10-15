@@ -1,5 +1,7 @@
 package com.learnkafka.controller;
 
+import com.learnkafka.TestcontainersConfiguration;
+import org.springframework.context.annotation.Import;
 import com.learnkafka.avro.BookAvro;
 import com.learnkafka.avro.LibraryEventAvro;
 import com.learnkafka.avro.LibraryEventTypeAvro;
@@ -36,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(topics = {"library-events"}, partitions = 3)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 @TestPropertySource(properties = {

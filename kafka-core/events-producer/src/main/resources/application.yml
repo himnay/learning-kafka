@@ -27,11 +27,22 @@ spring:
         # Confluent Schema Registry (kafka-core docker compose). The serializer registers each
         # schema on first send: subjects "library-events-value" and "coffee-orders-value".
         schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
+  # ── Database: coffee orders are stored with their outbox event (schema coffee) ──
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5435}/${POSTGRES_DB:library}
+    username: ${POSTGRES_USER:library}
+    password: ${POSTGRES_PASSWORD:library}
+  flyway:
+    # the producer owns its own schema, with its own Flyway history, next to the consumers' tables
+    schemas: coffee
+    default-schema: coffee
 
 app:
   coffee:
     # CoffeeVipPartitioner sends these customers' orders to partition 0
     vip-customers: Ada,Grace
+    # coffee-orders partition count: the VIP rule hashes everyone else over partitions 1..N-1
+    partitions: 3
   key-routing:
     # KeySubstringPartitioner: every key containing one of these substrings goes to one partition.
     # "VIP=0" pins VIP to partition 0; a bare substring is hashed (murmur2): UK → 1, US → 2 on 3 partitions.

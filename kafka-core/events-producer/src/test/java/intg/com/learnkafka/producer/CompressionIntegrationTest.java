@@ -1,5 +1,7 @@
 package com.learnkafka.producer;
 
+import com.learnkafka.TestcontainersConfiguration;
+import org.springframework.context.annotation.Import;
 import com.learnkafka.avro.LibraryEventAvro;
 import com.learnkafka.domain.Book;
 import com.learnkafka.domain.LibraryEvent;
@@ -35,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The producer metric compression-rate-avg (compressed batch size / raw size) shows the effect.
  */
 @SpringBootTest
+@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(topics = LibraryEventProducer.TOPIC, partitions = 3)
 @DirtiesContext
 @TestPropertySource(properties = {

@@ -1,5 +1,7 @@
 package com.learnkafka.routing;
 
+import com.learnkafka.TestcontainersConfiguration;
+import org.springframework.context.annotation.Import;
 import com.learnkafka.domain.KeyRoutingRequest;
 import com.learnkafka.domain.KeyRoutingResponse;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -26,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** The real partitioner inside a real producer: where do records land on a 3-partition topic? */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(topics = KeyRoutingProducer.TOPIC, partitions = 3)
 @DirtiesContext
 @TestPropertySource(properties = {
