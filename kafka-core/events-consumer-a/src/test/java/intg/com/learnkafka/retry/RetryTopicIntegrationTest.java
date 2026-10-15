@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.RecoverableDataAccessException;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -78,6 +79,7 @@ import static org.mockito.Mockito.verify;
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.properties.schema.registry.url=" + AvroEvents.REGISTRY,
         "app.retry.interval=1h",
+        "app.retry.delay=0s",       // this context's drainer retries at once; recordNotYetDue_... uses its own
         // fail fast while the database is "down" (realDatabaseOutage_...): 3 attempts × 2 s, not × 30 s
         "spring.datasource.hikari.connection-timeout=2000"
 })
@@ -104,6 +106,9 @@ class RetryTopicIntegrationTest {
 
     @Autowired
     PostgreSQLContainer postgres;
+
+    @Autowired
+    ConsumerFactory<Object, Object> consumerFactory;
 
     @MockitoSpyBean
     LibraryEventsService serviceSpy;
@@ -242,6 +247,30 @@ class RetryTopicIntegrationTest {
 
         assertThat(libraryEventsRepository.findAll())
                 .anySatisfy(saved -> assertThat(saved.getBook().getBookName()).isEqualTo("Retry-Db-Down"));
+    }
+
+    @Test
+    @DisplayName("A record forwarded less than app.retry.delay ago is not retried yet; once the delay has passed it is")
+    void recordNotYetDue_waitsForALaterRun() {
+        var event = newEvent(9106, "Retry-Not-Due");
+        doThrow(new RecoverableDataAccessException("database down"))
+                .when(serviceSpy).processLibraryEvent(argThat(isBook("Retry-Not-Due")));
+        kafkaTemplate.executeInTransaction(t -> t.sendDefault(9106, event));
+        awaitRecord(RETRY_TOPIC, r -> isEvent(event, RETRY_TOPIC, r) && headerValues(r, RetryRouter.ATTEMPT_HEADER).equals(List.of("1")));
+        long before = callsFor("Retry-Not-Due");
+
+        var patientDrainer = drainerWith(Duration.ofHours(1), Duration.ofMinutes(1));   // delay 1 h
+        patientDrainer.drainOnce();
+        assertThat(callsFor("Retry-Not-Due")).as("forwarded seconds ago: not due").isEqualTo(before);
+
+        drainer.drainOnce();                                                             // delay 0 s
+        assertThat(callsFor("Retry-Not-Due")).isEqualTo(before + 1);
+    }
+
+    /** A drainer on the same group and topic, with its own delay and max-run. */
+    private RetryTopicDrainer drainerWith(Duration delay, Duration maxRun) {
+        var properties = new RetryProperties(RETRY_TOPIC, "library-events-retry-group", Duration.ofHours(1), 3, maxRun, delay);
+        return new RetryTopicDrainer(consumerFactory, kafkaTemplate, serviceSpy, routerSpy, properties, "retry-test");
     }
 
     /** What a PostgreSQL outage looks like to the app: existing connections die, new ones are refused. */

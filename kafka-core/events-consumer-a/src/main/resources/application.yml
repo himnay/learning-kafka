@@ -86,6 +86,7 @@ app:
     topic: library-events.retry
     group-id: library-events-retry-group   # the scheduled drain job's own consumer group
     interval: 30s       # fixed delay between two drain runs
+    delay: 30s          # a record is retried only after waiting this long on the retry topic (default: interval)
     max-attempts: 3     # processing attempts from the retry topic before the DLT
     max-run: 1m         # a single drain run never drains longer than this
 

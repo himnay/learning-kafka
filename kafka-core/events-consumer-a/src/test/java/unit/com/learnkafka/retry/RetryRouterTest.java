@@ -53,7 +53,7 @@ class RetryRouterTest {
 
     @BeforeEach
     void setUp() {
-        var properties = new RetryProperties(RETRY, "library-events-retry-group", Duration.ofSeconds(30), 3, Duration.ofMinutes(1));
+        var properties = new RetryProperties(RETRY, "library-events-retry-group", Duration.ofSeconds(30), 3, Duration.ofMinutes(1), Duration.ofSeconds(30));
         router = new RetryRouter(template, properties, DLT);
     }
 
