@@ -18,7 +18,7 @@ class EventMetadataTest {
     @Test
     @DisplayName("newEvent stamps a random id, millisecond time and version 1")
     void newEvent() {
-        var metadata = EventMetadata.newEvent("LibraryEvent.NEW", "library-events-producer", "req-1");
+        var metadata = EventMetadata.newEvent("LibraryEvent.NEW", "events-producer", "req-1");
 
         assertThat(metadata.eventId()).isNotNull();
         assertThat(metadata.eventVersion()).isEqualTo(1);
@@ -29,7 +29,7 @@ class EventMetadataTest {
     @Test
     @DisplayName("Java ↔ Avro round trip keeps every field (Avro stores timestamp-millis)")
     void avroRoundTrip() {
-        var metadata = EventMetadata.newEvent("CoffeeOrder.PLACED", "library-events-producer", null);
+        var metadata = EventMetadata.newEvent("CoffeeOrder.PLACED", "events-producer", null);
 
         assertThat(EventMetadata.fromAvro(metadata.toAvro())).isEqualTo(metadata);
     }

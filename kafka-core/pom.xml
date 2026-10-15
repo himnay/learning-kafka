@@ -17,9 +17,9 @@
 
     <modules>
         <module>schemas</module>
-        <module>library-events-producer</module>
-        <module>library-events-consumer-a</module>
-        <module>library-events-consumer-b</module>
+        <module>events-producer</module>
+        <module>events-consumer-a</module>
+        <module>events-consumer-b</module>
     </modules>
 
     <dependencies>

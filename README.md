@@ -10,7 +10,7 @@
 4. 🧰 [Tech Stack](#tech-stack)
 5. 🏗️ [Gang of Four Design Patterns Applied](#gang-of-four-design-patterns-applied)
 6. 🚀 [Quick Start](#quick-start)
-7. 🌐 [API Reference — Library Events Producer](#api-reference--library-events-producer-port-8080)
+7. 🌐 [API Reference — Events Producer](#api-reference--events-producer-port-8080)
 8. 📈 [Observability](#observability)
 9. 🧪 [Running Tests](#running-tests)
 10. 🏗️ [Module Details](#module-details)
@@ -28,9 +28,9 @@ This document is a **conceptual deep-dive** — it explains *why* Kafka is shape
 learning-kafka/                       ← root POM (spring-boot-starter-parent)
 ├── kafka-core/                       ← Avro + Schema Registry on a 3-broker KRaft cluster (README: kafka-core/README.md)
 │   ├── schemas/                      ← the event contract: Avro schemas + base event (EventMetadata, BaseEvent)
-│   ├── library-events-producer/      ← REST API → Kafka: library events, coffee orders, key routing; 2 custom partitioners, zstd (port 8080)
-│   ├── library-events-consumer-a/    ← Kafka → PostgreSQL, transactional + idempotent, retry topics, share group, replay (port 8081)
-│   ├── library-events-consumer-b/    ← same code as a, same groups, KIP-848 group protocol (port 8086)
+│   ├── events-producer/              ← REST API → Kafka: library events, coffee orders, key routing; 2 custom partitioners, zstd (port 8080)
+│   ├── events-consumer-a/            ← Kafka → PostgreSQL, transactional + idempotent, retry topics, share group, replay (port 8081)
+│   ├── events-consumer-b/            ← same code as a, same groups, KIP-848 group protocol (port 8086)
 │   └── connect/                      ← Kafka Connect JDBC sink → PostgreSQL "events" + reconciliation SQL
 └── kafka-stream/                     ← Kafka Streams (README: kafka-stream/README.md)
     ├── orders-domain/                ← shared domain records (library JAR)
@@ -58,11 +58,11 @@ This repo creates its topics programmatically with Spring Kafka's [`TopicBuilder
 
 | Topic                | Partitions     | Declared in                                                                      |
 |----------------------|----------------|----------------------------------------------------------------------------------|
-| `library-events`     | 3              | `kafka-core/library-events-producer/.../config/AutoCreateConfig.java`            |
-| `library-events.DLT` | 3              | `kafka-core/library-events-consumer-a/.../config/LibraryEventsConsumerConfig.java` |
+| `library-events`     | 3              | `kafka-core/events-producer/.../config/AutoCreateConfig.java`                    |
+| `library-events.DLT` | 3              | `kafka-core/events-consumer-a/.../config/LibraryEventsConsumerConfig.java`       |
 | `orders`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
 | `stores`             | 2              | `kafka-stream/orders-streams-app/.../config/OrdersStreamsConfiguration.java`     |
-| `coffee-orders`      | broker default | created implicitly on first produce by `CoffeeOrdersProducer` (in `library-events-producer`) |
+| `coffee-orders`      | broker default | created implicitly on first produce by `CoffeeOrdersProducer` (in `events-producer`) |
 
 The **key** a producer assigns to a record determines which partition it lands on (`hash(key) % numPartitions`, by default). `LibraryEventProducer` keys every record by `libraryEventId` (an [`Integer`][Integer]); `OrdersTopology` re-keys the incoming order stream by `locationId` via `.selectKey((key, order) -> order.locationId())` specifically so that all orders for the same store land on the same partition — which is what makes per-store aggregation with a local state store possible (see Part 4).
 
@@ -74,7 +74,7 @@ Kafka does not track "read" vs "unread" the way a queue does. Instead, each **co
 
 <ul>
 
-- `library-events-consumer-a` / `-b` commit offsets ***inside a Kafka transaction***: Kafka's own `enable.auto.commit` is off, and the listener container sends each consumed offset with `sendOffsetsToTransaction` after the listener returns, atomically with anything the record caused to be published (DLT, re-publish). A record that throws rolls the transaction back and is retried or recovered by the `AfterRollbackProcessor`.
+- `events-consumer-a` / `-b` commit offsets ***inside a Kafka transaction***: Kafka's own `enable.auto.commit` is off, and the listener container sends each consumed offset with `sendOffsetsToTransaction` after the listener returns, atomically with anything the record caused to be published (DLT, re-publish). A record that throws rolls the transaction back and is retried or recovered by the `AfterRollbackProcessor`.
 - `LibraryEventsConsumerManualOffset` (active only under the `manual-offset` profile, which switches the default listener off) demonstrates the alternative: [`AcknowledgingMessageListener`][AcknowledgingMessageListener] with `MANUAL_IMMEDIATE` ack mode, where the application explicitly calls `acknowledgment.acknowledge()` after it has finished processing. This is the safer pattern when "processed" and "committed" must not drift apart (e.g., commit only after a DB write succeeds).
 
 </ul>
@@ -91,7 +91,7 @@ A **consumer group** is a set of consumer instances that cooperatively read a to
 
 <p align="center"><sub>Every group gets all partitions; inside a group each partition goes to exactly one consumer. Diagram: <a href="https://kafka.apache.org/documentation/#intro_concepts_and_terms">Apache Kafka documentation</a>, Apache-2.0.</sub></p>
 
-kafka-core shows group membership across ***two separate apps***: `library-events-consumer-a` and `library-events-consumer-b` share `library-events-listener-group` (and `coffee-orders-listener-group`), each with one listener thread (`spring.kafka.listener.concurrency: 1`). The group coordinator splits the 3 partitions between them — e.g. a gets P0+P1, b gets P2 — and gives all three to the survivor if one app stops. Raising `concurrency` adds listener threads inside one JVM instead; either way, partition count caps the useful parallelism.
+kafka-core shows group membership across ***two separate apps***: `events-consumer-a` and `events-consumer-b` share `library-events-listener-group` (and `coffee-orders-listener-group`), each with one listener thread (`spring.kafka.listener.concurrency: 1`). The group coordinator splits the 3 partitions between them — e.g. a gets P0+P1, b gets P2 — and gives all three to the survivor if one app stops. Raising `concurrency` adds listener threads inside one JVM instead; either way, partition count caps the useful parallelism.
 
 ### <span style="color:hsl(222,80%,58%)">Delivery semantics: at-least-once, at-most-once, exactly-once</span>
 
@@ -105,8 +105,8 @@ What this codebase guarantees:
 
 <ul>
 
-- `library-events-producer` sets `acks: all` (wait for all in-sync replicas) with `enable.idempotence: true` and `retries: 10` — *producer-side* sends are idempotent (no duplicate writes from producer retries) and durable.
-- `library-events-consumer-a` / `-b` use ***Kafka transactions*** (offset + DLT/re-publish commit atomically) plus an ***idempotent consumer***: the `processed_event` table in PostgreSQL records `(group, topic, partition, offset)` and the base event's `eventId` in the same database transaction as the business write. Delivery is still at-least-once (a crash between the DB commit and the Kafka commit redelivers the record), but the redelivery is skipped, so each record changes the database ***effectively exactly once***. Details: [`kafka-core/README.md`](kafka-core/README.md) §12–§16.
+- `events-producer` sets `acks: all` (wait for all in-sync replicas) with `enable.idempotence: true` and `retries: 10` — *producer-side* sends are idempotent (no duplicate writes from producer retries) and durable.
+- `events-consumer-a` / `-b` use ***Kafka transactions*** (offset + DLT/re-publish commit atomically) plus an ***idempotent consumer***: the `processed_event` table in PostgreSQL records `(group, topic, partition, offset)` and the base event's `eventId` in the same database transaction as the business write. Delivery is still at-least-once (a crash between the DB commit and the Kafka commit redelivers the record), but the redelivery is skipped, so each record changes the database ***effectively exactly once***. Details: [`kafka-core/README.md`](kafka-core/README.md) §12–§16.
 - Kafka Streams uses `processing.guarantee=at_least_once` by default (not overridden anywhere in `OrdersStreamsConfiguration`), so the count/revenue aggregations can, in rare failure-and-reprocessing scenarios, double-count a record. Enabling exactly-once semantics for the streams app would mean setting `processing.guarantee=exactly_once_v2`, which turns on transactional writes to the state-store changelog topics and the output topics together.
 
 </ul>
@@ -125,11 +125,11 @@ Kafka retains records for a configured time/size window (topic retention), indep
 ```mermaid
 flowchart LR
     subgraph "kafka-core (3 brokers, KRaft)"
-        ProducerAPI["library-events-producer\nREST :8080"] -->|"Avro LibraryEventAvro\nkey=libraryEventId"| T1[("library-events\n3 partitions, RF 3")]
+        ProducerAPI["events-producer\nREST :8080"] -->|"Avro LibraryEventAvro\nkey=libraryEventId"| T1[("library-events\n3 partitions, RF 3")]
         ProducerAPI -->|"Avro CoffeeOrder\nkey=order UUID"| T2[("coffee-orders")]
         ProducerAPI -. "register/fetch schema" .-> SR[["Schema Registry\n:8085"]]
-        T1 -->|"P0, P1"| ConsumerA["library-events-consumer-a\n:8081"]
-        T1 -->|"P2"| ConsumerB["library-events-consumer-b\n:8086"]
+        T1 -->|"P0, P1"| ConsumerA["events-consumer-a\n:8081"]
+        T1 -->|"P2"| ConsumerB["events-consumer-b\n:8086"]
         T2 --> ConsumerA
         T2 --> ConsumerB
         ConsumerA -. "fetch schema by id" .-> SR
@@ -270,11 +270,11 @@ mvn clean install -DskipTests
 
 ```bash
 # Terminal 1 — Producer
-mvn spring-boot:run -pl kafka-core/library-events-producer
+mvn spring-boot:run -pl kafka-core/events-producer
 
 # Terminals 2 and 3 — two consumers in the same group (they split the partitions)
-mvn spring-boot:run -pl kafka-core/library-events-consumer-a
-mvn spring-boot:run -pl kafka-core/library-events-consumer-b
+mvn spring-boot:run -pl kafka-core/events-consumer-a
+mvn spring-boot:run -pl kafka-core/events-consumer-b
 
 # Terminal 3 — Streams
 mvn spring-boot:run -pl kafka-stream/orders-streams-app
@@ -282,8 +282,8 @@ mvn spring-boot:run -pl kafka-stream/orders-streams-app
 
 ---
 
-<a id="api-reference--library-events-producer-port-8080"></a>
-## <span style="color:hsl(347,80%,58%)">7. 🌐 API Reference — Library Events Producer (port 8080)</span>
+<a id="api-reference--events-producer-port-8080"></a>
+## <span style="color:hsl(347,80%,58%)">7. 🌐 API Reference — Events Producer (port 8080)</span>
 
 ### <span style="color:hsl(124,80%,58%)">POST /v1/libraryevent — Publish a new library event</span>
 
@@ -311,7 +311,7 @@ Response `201 Created` — the event as published, with its base-event metadata 
     "eventType": "LibraryEvent.NEW",
     "eventVersion": 1,
     "occurredAt": "2026-10-14T05:47:01.773Z",
-    "source": "library-events-producer",
+    "source": "events-producer",
     "correlationId": "e2e-req-1"
   },
   "libraryEventId": null,
@@ -397,8 +397,8 @@ cd kafka-core && mvn test
 | Module | Tests |
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
-| `kafka-core/library-events-producer` | 31 — incl. both partitioners, key routing end to end, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
-| `kafka-core/library-events-consumer-a` / `-b` | 23 each (b on the KIP-848 protocol) |
+| `kafka-core/events-producer` | 31 — incl. both partitioners, key routing end to end, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
+| `kafka-core/events-consumer-a` / `-b` | 23 each (b on the KIP-848 protocol) |
 | `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
 Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent's in-memory `mock://` Schema Registry. The kafka-core consumer tests need Docker: they run against a real PostgreSQL via Testcontainers, and `LibraryEventsConsumerContainerTest` also uses a real `cp-kafka:8.3.2` broker ([`ConfluentKafkaContainer`][ConfluentKafkaContainer]).
@@ -408,7 +408,7 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 <a id="module-details"></a>
 ## <span style="color:hsl(314,80%,58%)">10. 🏗️ Module Details</span>
 
-### <span style="color:hsl(92,80%,58%)">kafka-core/library-events-producer</span>
+### <span style="color:hsl(92,80%,58%)">kafka-core/events-producer</span>
 
 <ul>
 
@@ -423,7 +423,7 @@ Most Kafka integration tests use [`@EmbeddedKafka`][EmbeddedKafka] and Confluent
 
 </ul>
 
-### <span style="color:hsl(229,80%,58%)">kafka-core/library-events-consumer-a and -b</span>
+### <span style="color:hsl(229,80%,58%)">kafka-core/events-consumer-a and -b</span>
 
 <ul>
 

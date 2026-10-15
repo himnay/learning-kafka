@@ -78,16 +78,16 @@ kafka-core/
 ├── docker-compose.yml           3 Kafka brokers + topic init + Schema Registry + PostgreSQL + Kafka Connect + Kafdrop
 ├── connect/                     JDBC sink connector config + reconciliation SQL
 ├── schemas/                     Avro .avsc files → generated Java (library JAR, no Spring Boot)
-├── library-events-producer/     REST API (port 8080) → "library-events", "coffee-orders" (Avro, VIP partitioner)
+├── events-producer/             REST API (port 8080) → "library-events", "coffee-orders" (Avro, VIP partitioner)
 │                                and "key-routing" (String, key-substring partitioner); zstd-compressed batches
-├── library-events-consumer-a/   port 8081: library-events → PostgreSQL + compacted "library-book-state",
+├── events-consumer-a/           port 8081: library-events → PostgreSQL + compacted "library-book-state",
 │                                coffee-orders → consumer group with retry topics + "coffee-baristas" share group, replay API
-└── library-events-consumer-b/   port 8086: same code as a, same groups — but on the KIP-848 group protocol
+└── events-consumer-b/           port 8086: same code as a, same groups — but on the KIP-848 group protocol
 ```
 
 ```mermaid
 flowchart LR
-    Client([HTTP client]) -->|POST/PUT /v1/libraryevent<br/>POST /v1/coffee-orders<br/>POST /v1/key-routing| P[library-events-producer<br/>:8080]
+    Client([HTTP client]) -->|POST/PUT /v1/libraryevent<br/>POST /v1/coffee-orders<br/>POST /v1/key-routing| P[events-producer<br/>:8080]
     P -.->|register / look up schema| SR[(Schema Registry<br/>:8085)]
     P -->|Avro, idempotent<br/>acks=all| T
     P -->|Avro| CO
@@ -100,8 +100,8 @@ flowchart LR
         KR[(key-routing)]
     end
 
-    T -->|P0, P1| A[library-events-consumer-a<br/>:8081]
-    T -->|P2| B[library-events-consumer-b<br/>:8086]
+    T -->|P0, P1| A[events-consumer-a<br/>:8081]
+    T -->|P2| B[events-consumer-b<br/>:8086]
     CO -->|coffee-orders-listener-group<br/>+ coffee-baristas share group| A & B
     A & B -.->|failed coffee orders| RT[(coffee-orders-retry-0/1/2<br/>→ coffee-orders-dlt)]
     A & B -->|latest state per id<br/>in the Kafka transaction| ST[(library-book-state<br/>compacted)]
@@ -265,7 +265,7 @@ classDiagram
 
 ```json
 "metadata": {"eventId": "44b660dc-ca14-4d49-a939-438d4ca0b7cc", "eventType": "LibraryEvent.NEW", "eventVersion": 1,
-             "occurredAt": "2026-10-14T05:47:01.773Z", "source": "library-events-producer", "correlationId": "e2e-req-1"}
+             "occurredAt": "2026-10-14T05:47:01.773Z", "source": "events-producer", "correlationId": "e2e-req-1"}
 ```
 
 ***Consumers — handled once, for every event type.***
@@ -325,7 +325,7 @@ erDiagram
     }
 ```
 
-- ***Producer and consumer*** — `POST /v1/coffee-orders` lives in `library-events-producer`, and the `CoffeeOrdersConsumer` listener lives in both consumer apps ([§9](#9-producers), [§10](#10-consumers)).
+- ***Producer and consumer*** — `POST /v1/coffee-orders` lives in `events-producer`, and the `CoffeeOrdersConsumer` listener lives in both consumer apps ([§9](#9-producers), [§10](#10-consumers)).
 - ***Logical types*** — `CoffeeOrder.id` is `{"type": "string", "logicalType": "uuid"}` and `ordered_time` is `{"type": "long", "logicalType": "timestamp-millis"}`. The generated classes expose idiomatic `UUID` and [`Instant`][Instant] getters/setters (`CoffeeOrdersProducer.buildCoffeeOrder()` calls `.setId(UUID.randomUUID())` and `.setOrderedTime(Instant.now())`) while the wire format stays a plain string/long. `OrderLineItem.cost` uses a `bytes` logical `decimal` (precision 3, scale 2) so [`BigDecimal`][BigDecimal] round-trips exactly; the plugin turns this on with `<enableDecimalLogicalType>true</enableDecimalLogicalType>`.
 - ***A schema not yet wired to any app*** — `CoffeeUpdateEvent.avsc` (`{id, status}`, `status` enum `PROCESSING | READY_FOR_PICK_UP`) compiles alongside the others but nothing produces or consumes it. It would be its own subject (`CoffeeUpdateEvent-value` if published), showing that the registry manages compatibility ***per subject***, not globally.
 
@@ -362,7 +362,7 @@ The other modes, for contrast. None is configured here; `BACKWARD` applies becau
 <a id="9-producers"></a>
 ## <span style="color:hsl(112,80%,58%)">9. 📤 Producers</span>
 
-### <span style="color:hsl(27,80%,58%)">`LibraryEventProducer` (library-events-producer)</span>
+### <span style="color:hsl(27,80%,58%)">`LibraryEventProducer` (events-producer)</span>
 
 Three send methods, each demonstrating a different Spring Kafka [`KafkaTemplate`][KafkaTemplate] usage pattern. The template's value type is the ***generated Avro class***, `KafkaTemplate<Integer, LibraryEventAvro>`:
 
@@ -392,7 +392,7 @@ spring.kafka.producer:
 - **`enable.idempotence=true`** — see [§13](#13-idempotency-producer-and-consumer).
 - **Auto-topic-creation** (`AutoCreateConfig`) declares `library-events` and `key-routing` with `3` partitions via [`NewTopic`][NewTopic], so the app also works against a bare broker. With docker compose, `kafka-init` has already created them with RF 3, so this is a no-op there.
 
-### <span style="color:hsl(165,80%,58%)">`CoffeeOrdersProducer` (also in library-events-producer)</span>
+### <span style="color:hsl(165,80%,58%)">`CoffeeOrdersProducer` (also in events-producer)</span>
 
 ```java
 private final KafkaTemplate<String, CoffeeOrder> kafkaTemplate;   // value type is the generated Avro class
@@ -401,16 +401,16 @@ kafkaTemplate.send(TOPIC, order.getId().toString(), order)        // key = order
 ```
 
 - ***Its own `KafkaTemplate`, not a bean.*** Coffee keys are UUID strings, library keys are Integers. `CoffeeOrdersProducer` builds a String-keyed template from Boot's producer factory (`copyWithConfigurationOverride(key.serializer=StringSerializer)`). Declaring a second `KafkaTemplate` ***bean*** would make Boot's auto-configured template (used by `LibraryEventProducer`) back off.
-- ***Its own `client.id`*** — `library-events-producer-coffee-N`. The copied factory is not a Spring bean, so it can't name its producers after `spring.application.name` the way Boot's factory does (`library-events-producer-producer-N`); without a `client.id` they would show up as `producer-N` in metrics.
+- ***Its own `client.id`*** — `events-producer-coffee-N`. The copied factory is not a Spring bean, so it can't name its producers after `spring.application.name` the way Boot's factory does (`events-producer-producer-N`); without a `client.id` they would show up as `producer-N` in metrics.
 - ***REST records in `domain`*** — `CoffeeOrderRequest` and `CoffeeOrderResponse` sit next to the library-event records in `com.learnkafka.domain`.
 
 `POST /v1/coffee-orders` (`CoffeeOrderRequest{name, nickName}`) builds a full `CoffeeOrder` — hardcoded `Store`/`Address`/one `Latte` `OrderLineItem` for demo purposes, a real `UUID.randomUUID()` id, [`Instant.now()`][Instant] ordered time, `PickUp.IN_STORE`, `status = "NEW"` — and publishes it, logging the partition on success. It returns a `CoffeeOrderResponse` record rather than the Avro object ([§21](#21-gotchas-avro-112--spring-boot-4)).
 
-### <span style="color:hsl(220,80%,58%)">`KeyRoutingProducer` (also in library-events-producer)</span>
+### <span style="color:hsl(220,80%,58%)">`KeyRoutingProducer` (also in events-producer)</span>
 
 `POST /v1/key-routing` (`KeyRoutingRequest{key, message}`) sends the message as a plain ***String*** record to `key-routing`, keyed by whatever the caller sends, through a template that uses `KeySubstringPartitioner` ([§25](#25-custom-partitioner-and-compression)). It waits for the broker's ack and returns `KeyRoutingResponse{key, matchedSubstring, partition, offset}`, so you can see where each key landed.
 
-- ***Same pattern as coffee*** — its own String/String template built from Boot's producer factory: it inherits `acks`, idempotence, zstd and `linger.ms`, and has its own `client.id` (`library-events-producer-key-routing-N`).
+- ***Same pattern as coffee*** — its own String/String template built from Boot's producer factory: it inherits `acks`, idempotence, zstd and `linger.ms`, and has its own `client.id` (`events-producer-key-routing-N`).
 - ***Rules checked at startup*** — the controller parses `app.key-routing.substring-partitions` itself, so a malformed rule stops the app instead of failing the first send.
 - ***Why a separate topic*** — the other keys can't show substring routing: library events are keyed by an Integer id (`null` for NEW) and coffee orders by a random UUID.
 
@@ -419,9 +419,9 @@ kafkaTemplate.send(TOPIC, order.getId().toString(), order)        // key = order
 <a id="10-consumers"></a>
 ## <span style="color:hsl(304,80%,58%)">10. 📥 Consumers</span>
 
-### <span style="color:hsl(54,80%,50%)">`LibraryEventsConsumer` → `LibraryEventsService` (library-events-consumer-a / -b)</span>
+### <span style="color:hsl(54,80%,50%)">`LibraryEventsConsumer` → `LibraryEventsService` (events-consumer-a / -b)</span>
 
-`library-events-consumer-a` and `library-events-consumer-b` contain the same code. Only the app name, port and client id differ ([§11](#11-two-consumers-one-group-consumer-a-and-consumer-b)).
+`events-consumer-a` and `events-consumer-b` contain the same code. Only the app name, port and client id differ ([§11](#11-two-consumers-one-group-consumer-a-and-consumer-b)).
 
 ```java
 @KafkaListener(topics = {"library-events"}, groupId = "${spring.kafka.consumer.group-id}",
@@ -515,10 +515,10 @@ The coffee flow is the same with `CoffeeOrdersProducer`, subject `coffee-orders-
 
 | | consumer-a | consumer-b |
 |---|---|---|
-| Module | `library-events-consumer-a` | `library-events-consumer-b` |
+| Module | `events-consumer-a` | `events-consumer-b` |
 | HTTP port | `8081` | `8086` (`8082` is the kafka-stream app, `8085` Schema Registry) |
-| `spring.application.name` / `client-id` | `library-events-consumer-a` | `library-events-consumer-b` |
-| Transaction id prefix | `library-events-consumer-a-tx-` | `library-events-consumer-b-tx-` |
+| `spring.application.name` / `client-id` | `events-consumer-a` | `events-consumer-b` |
+| Transaction id prefix | `events-consumer-a-tx-` | `events-consumer-b-tx-` |
 | `group-id` (library events) | `library-events-listener-group` | ***same*** |
 | `group-id` (coffee orders) | `coffee-orders-listener-group` | ***same*** |
 | Listener threads (`spring.kafka.listener.concurrency`) | 1 | 1 |
@@ -534,9 +534,9 @@ Real run — 6 NEW events (null key, so all on P0), then 6 keyed UPDATE events (
 
 ```
 PARTITION  CURRENT-OFFSET  LAG  CONSUMER-ID
-0          10              0    library-events-consumer-a-0
-1          5               0    library-events-consumer-a-0
-2          3               0    library-events-consumer-b-0
+0          10              0    events-consumer-a-0
+1          5               0    events-consumer-a-0
+2          3               0    events-consumer-b-0
 ```
 
 consumer-a processed the records on P0 + P1, consumer-b those on P2, and all 6 books in PostgreSQL were created and then updated.
@@ -545,9 +545,9 @@ consumer-a processed the records on P0 + P1, consumer-b those on P2, and all 6 b
 
 ```
 PARTITION  CONSUMER-ID
-0          library-events-consumer-b-0
-1          library-events-consumer-b-0
-2          library-events-consumer-b-0
+0          events-consumer-b-0
+1          events-consumer-b-0
+2          events-consumer-b-0
 ```
 
 Start consumer-a again and the partitions are shared once more. Coffee orders split the same way in their own group — in a real run, 3 orders went 2 to consumer-a (P0, P1) and 1 to consumer-b (P2).
@@ -723,7 +723,7 @@ With [`AcknowledgingMessageListener`][AcknowledgingMessageListener] + `MANUAL_IM
 <a id="17-database-and-flyway-migrations"></a>
 ## <span style="color:hsl(14,80%,58%)">17. 🗄️ Database and Flyway migrations</span>
 
-***Flyway owns the schema*** (`library-events-consumer-*/src/main/resources/db/migration`), and Hibernate only checks it (`ddl-auto: validate`) — the app fails fast at startup if the entities and tables disagree.
+***Flyway owns the schema*** (`events-consumer-*/src/main/resources/db/migration`), and Hibernate only checks it (`ddl-auto: validate`) — the app fails fast at startup if the entities and tables disagree.
 
 | Migration | Creates |
 |---|---|
@@ -759,11 +759,11 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 
 | App / service | Port |
 |---|---|
-| `library-events-producer` | `8080` |
-| `library-events-consumer-a` | `8081` |
+| `events-producer` | `8080` |
+| `events-consumer-a` | `8081` |
 | Kafka Connect REST API | `8083` |
 | Schema Registry | `8085` |
-| `library-events-consumer-b` | `8086` |
+| `events-consumer-b` | `8086` |
 | Kafka brokers | `9092`, `9093`, `9094` |
 | Kafdrop | `9001` |
 | PostgreSQL | `5435` |
@@ -832,12 +832,12 @@ docker compose up -d
 docker logs kafka-core-kafka-init        # partition leaders/followers + active controller
 
 # 2. One producer + two consumers (Flyway migrates on startup). No profile needed.
-mvn spring-boot:run -pl kafka-core/library-events-producer
-mvn spring-boot:run -pl kafka-core/library-events-consumer-a
-mvn spring-boot:run -pl kafka-core/library-events-consumer-b
+mvn spring-boot:run -pl kafka-core/events-producer
+mvn spring-boot:run -pl kafka-core/events-consumer-a
+mvn spring-boot:run -pl kafka-core/events-consumer-b
 
 # Optional, instead of a consumer: the manual-offset demo listener
-mvn spring-boot:run -pl kafka-core/library-events-consumer-a -Dspring-boot.run.profiles=manual-offset
+mvn spring-boot:run -pl kafka-core/events-consumer-a -Dspring-boot.run.profiles=manual-offset
 ```
 
 ***Try it***
@@ -929,7 +929,7 @@ A ***Kafka Connect JDBC sink connector*** reads `library-events` and writes ever
 
 ```mermaid
 flowchart LR
-    P[library-events-producer] -->|Avro| T[(library-events)]
+    P[events-producer] -->|Avro| T[(library-events)]
     T -->|library-events-listener-group| C[consumer-a / consumer-b]
     T -->|connect-library-events-jdbc-sink| KC[JDBC sink connector]
     C -->|business tables + processed_event| PG[(PostgreSQL)]
@@ -1191,7 +1191,7 @@ flowchart LR
 | from the burst | 30 | ~4,710 B | 1,120 B (24%) |
 
 - ***Producer metric*** `compression-rate-avg` (compressed batch ÷ raw batch) during that run: ***0.26*** for library events. Key-routing sends one record at a time, and there zstd made the batches ***bigger*** (1.25). The consumer apps' transactional producers write one record per transaction, so they sit around ***1.2***: compression pays off only once records share a batch.
-- ***Watch it*** — Grafana ***Learning Kafka*** → ***Producers*** → ***Compression ratio*** and ***Bytes sent per second***, per `client_id`. Or ask the app: `/actuator/metrics/kafka.producer.compression.rate.avg?tag=client.id:library-events-producer-producer-1`.
+- ***Watch it*** — Grafana ***Learning Kafka*** → ***Producers*** → ***Compression ratio*** and ***Bytes sent per second***, per `client_id`. Or ask the app: `/actuator/metrics/kafka.producer.compression.rate.avg?tag=client.id:events-producer-producer-1`.
 - ***On disk*** — `kafka-dump-log` prints `count:` and `compresscodec:` for each batch ([§29](#29-kafka-cli-cheat-sheet)).
 - ***Tested*** — `CompressionIntegrationTest` sends 500 events in one burst and gets `compression-rate-avg` ≈ ***0.22*** (asserted below 0.5); all 500 come back intact.
 
@@ -1236,8 +1236,8 @@ Real run — one group, mixed members:
 
 ```
 CLIENT-ID                    CURRENT-ASSIGNMENT    TARGET-ASSIGNMENT     UPGRADED
-library-events-consumer-a-0  library-events:2      library-events:2      false
-library-events-consumer-b-0  library-events:0,1    library-events:0,1    true
+events-consumer-a-0          library-events:2      library-events:2      false
+events-consumer-b-0          library-events:0,1    library-events:0,1    true
 ```
 
 `UPGRADED=true` marks the KIP-848 member; the broker computed the target assignment for both. All 18 consumer tests pass on either protocol.
@@ -1384,8 +1384,8 @@ No Schema Registry container is needed: tests point `schema.registry.url` at ***
 | Module | Tests | What they cover |
 |---|---|---|
 | `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
-| `library-events-producer` | 31 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersProducerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key) |
-| `library-events-consumer-a` / `-b` | 23 each | see below (consumer-b runs them on the KIP-848 protocol) |
+| `events-producer` | 31 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `CoffeeVipPartitionerTest` (VIP → P0, others never P0, same key → same partition); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersProducerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key) |
+| `events-consumer-a` / `-b` | 23 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
 

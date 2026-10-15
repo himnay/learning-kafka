@@ -855,7 +855,7 @@
       "_id": "fld_actuator_producer",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Library Events Producer (8080)",
+      "name": "Actuator — Events Producer (8080)",
       "description": "http://localhost:8080/actuator"
     },
     {
@@ -878,7 +878,7 @@
       "_id": "fld_actuator_consumer",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Library Events Consumer A (8081)",
+      "name": "Actuator — Events Consumer A (8081)",
       "description": "http://localhost:8081/actuator"
     },
     {
@@ -901,7 +901,7 @@
       "_id": "fld_actuator_consumer_b",
       "_type": "request_group",
       "parentId": "wrk_learning_kafka",
-      "name": "Actuator — Library Events Consumer B (8086)",
+      "name": "Actuator — Events Consumer B (8086)",
       "description": "http://localhost:8086/actuator"
     },
     {

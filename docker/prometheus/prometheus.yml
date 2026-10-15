@@ -3,17 +3,17 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: library-events-producer
+  - job_name: events-producer
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8080"]
 
-  - job_name: library-events-consumer-a
+  - job_name: events-consumer-a
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8081"]
 
-  - job_name: library-events-consumer-b
+  - job_name: events-consumer-b
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8086"]
