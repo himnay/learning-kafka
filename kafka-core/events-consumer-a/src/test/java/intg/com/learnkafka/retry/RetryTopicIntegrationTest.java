@@ -54,6 +54,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.times;
@@ -267,6 +268,27 @@ class RetryTopicIntegrationTest {
         assertThat(callsFor("Retry-Not-Due")).isEqualTo(before + 1);
     }
 
+    @Test
+    @DisplayName("max-run is checked between records: a slow batch stops at the deadline and the rest waits for the next run")
+    void maxRun_isCheckedBetweenRecords() {
+        doAnswer(invocation -> {
+            Thread.sleep(300);
+            return invocation.callRealMethod();
+        }).when(serviceSpy).processLibraryEvent(argThat(isBookPrefix("Retry-Slow-")));
+        kafkaTemplate.executeInTransaction(t -> {
+            for (int i = 1; i <= 5; i++) {
+                var record = new ProducerRecord<Integer, Object>(RETRY_TOPIC, 0, 9300 + i, newEvent(9300 + i, "Retry-Slow-" + i));
+                record.headers().add(RetryRouter.ATTEMPT_HEADER, "1".getBytes(UTF_8));
+                t.send(record);
+            }
+            return null;
+        });
+
+        drainerWith(Duration.ZERO, Duration.ofMillis(500)).drainOnce();
+
+        assertThat(callsForPrefix("Retry-Slow-")).as("slow records handled in one 500 ms run").isLessThanOrEqualTo(2);
+    }
+
     /** A drainer on the same group and topic, with its own delay and max-run. */
     private RetryTopicDrainer drainerWith(Duration delay, Duration maxRun) {
         var properties = new RetryProperties(RETRY_TOPIC, "library-events-retry-group", Duration.ofHours(1), 3, maxRun, delay);
@@ -292,6 +314,18 @@ class RetryTopicIntegrationTest {
     private Connection adminConnection() throws SQLException {
         var url = "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getMappedPort(5432) + "/postgres";
         return DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+    }
+
+    private long callsForPrefix(String prefix) {
+        var matcher = isBookPrefix(prefix);
+        return mockingDetails(serviceSpy).getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("processLibraryEvent"))
+                .filter(invocation -> matcher.matches(invocation.getArgument(0)))
+                .count();
+    }
+
+    private static ArgumentMatcher<ConsumerRecord<Integer, LibraryEventAvro>> isBookPrefix(String prefix) {
+        return r -> r != null && r.value() != null && r.value().getBook().getBookName().toString().startsWith(prefix);
     }
 
     private long callsFor(String bookName) {

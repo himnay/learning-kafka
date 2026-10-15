@@ -8,6 +8,7 @@ import com.learnkafka.service.LibraryEventsService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -111,10 +112,14 @@ public class RetryTopicDrainer {
         stopping = true;
     }
 
-    /** Pins the Avro reader class, as the main listener does (LibraryEventsConsumer.AVRO_READER_TYPE). */
+    /**
+     * Pins the Avro reader class, as the main listener does (LibraryEventsConsumer.AVRO_READER_TYPE), and
+     * fetches small batches: with the database down every record can take a connection timeout.
+     */
     private static Properties readerProperties() {
         var props = new Properties();
         props.setProperty("specific.avro.value.type", LibraryEventAvro.class.getName());
+        props.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "50");
         return props;
     }
 
@@ -165,6 +170,9 @@ public class RetryTopicDrainer {
                 if (record.timestamp() > dueBefore) {   // forwarded too recently: it and everything after it wait
                     active.remove(tp);
                     continue;
+                }
+                if (System.nanoTime() >= deadline) {    // max-run is checked per record, not per batch:
+                    return;                             // the rest is uncommitted and read again next run
                 }
                 handle(consumer, record, tally);
                 if (stopping) {
