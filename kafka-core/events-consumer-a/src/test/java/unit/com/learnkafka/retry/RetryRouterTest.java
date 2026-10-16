@@ -162,6 +162,26 @@ class RetryRouterTest {
     }
 
     @Test
+    @DisplayName("A negative retry-attempt counts as no attempt yet, not as extra attempts")
+    void negativeHeader_countsAsNoAttempt() {
+        stubSend();
+
+        router.accept(record(RETRY, "-5"), null, new RecoverableDataAccessException("db down"));
+
+        assertThat(attemptValues(sent())).containsExactly("1");
+    }
+
+    @Test
+    @DisplayName("A huge retry-attempt can't overflow into more retries: it goes to the DLT")
+    void hugeHeader_goesToDlt() {
+        stubSend();
+
+        router.accept(record(RETRY, String.valueOf(Integer.MAX_VALUE)), null, new RecoverableDataAccessException("db down"));
+
+        assertThat(sent().topic()).isEqualTo(DLT);
+    }
+
+    @Test
     @DisplayName("A main-topic record that still carries retry-attempt (re-driven from the DLT) starts again at 1")
     void mainTopicRecordWithStaleHeader_startsAgainAtOne() {
         stubSend();

@@ -739,7 +739,7 @@ app:
     max-run: 1m         # a single run never drains longer than this
 ```
 
-- ***Trade-off: per-key order*** — while a record waits on the retry topic, newer events with the same key are processed from `library-events`, so an `UPDATE` can overtake its `NEW`. Every retry-topic design trades ordering for not blocking the partition; the coffee orders' [`@RetryableTopic`](#23-non-blocking-retry-topics-retryabletopic) makes the same trade.
+- ***Trade-off: per-key order*** — while a record waits on the retry topic, newer events with the same key are processed from `library-events`, so an older event can be applied after a newer one: an `UPDATE` that waited on the retry topic overwrites a later `UPDATE` of the same book. (An `UPDATE` that overtakes its `NEW` fails validation and goes to the DLT.) Every retry-topic design trades ordering for not blocking the partition; the coffee orders' [`@RetryableTopic`](#23-non-blocking-retry-topics-retryabletopic) makes the same trade.
 - ***Why a drain job and not `@RetryableTopic`*** — the library listener already recovers in its transactional `AfterRollbackProcessor`, and one schedule (`app.retry.interval`) makes retry timing explicit. `@RetryableTopic` instead pauses each retry partition until a record's due time, stored in a header (so it survives restarts too).
 
 ---

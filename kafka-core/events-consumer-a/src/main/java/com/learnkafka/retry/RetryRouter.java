@@ -79,7 +79,7 @@ public class RetryRouter implements ConsumerAwareRecordRecoverer {
             return 0;
         }
         try {
-            return Integer.parseInt(new String(header.value(), UTF_8).trim());
+            return Math.max(0, Integer.parseInt(new String(header.value(), UTF_8).trim()));   // negative = malformed
         } catch (NumberFormatException notANumber) {
             return 0;
         }
@@ -112,7 +112,12 @@ public class RetryRouter implements ConsumerAwareRecordRecoverer {
     }
 
     public Route route(ConsumerRecord<?, ?> record, Exception ex) {
-        return isRecoverable(ex) && nextAttempt(record) <= properties.maxAttempts() ? Route.RETRY : Route.DLT;
+        if (!isRecoverable(ex)) {
+            return Route.DLT;
+        }
+        // compared before adding 1, so a huge header can't overflow into "more attempts left"
+        int attemptsSoFar = properties.topic().equals(record.topic()) ? attemptOf(record) : 0;
+        return attemptsSoFar < properties.maxAttempts() ? Route.RETRY : Route.DLT;
     }
 
     /** Publishes the record to the retry topic or the DLT; {@code consumer} may be null. */

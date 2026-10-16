@@ -5,6 +5,7 @@ import com.learnkafka.event.EventMetadata;
 import com.learnkafka.event.EventMetadataMdcInterceptor;
 import com.learnkafka.retry.RetryRouter.Route;
 import com.learnkafka.service.LibraryEventsService;
+import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -16,11 +17,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.log.LogAccessor;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.KafkaUtils;
 import org.springframework.kafka.support.serializer.DeserializationException;
 import org.springframework.kafka.support.serializer.SerializationUtils;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -57,6 +60,8 @@ public class RetryTopicDrainer {
     public record DrainResult(int processed, int requeued, int deadLettered) {}
 
     private final ConsumerFactory<Object, Object> consumerFactory;
+    // Must be the same KafkaTemplate RetryRouter publishes with: the forward joins transaction 2 only
+    // through this template's executeInTransaction producer; another instance would publish outside it.
     private final KafkaTemplate<Integer, Object> kafkaTemplate;
     private final LibraryEventsService libraryEventsService;
     private final RetryRouter router;
@@ -114,13 +119,33 @@ public class RetryTopicDrainer {
 
     /**
      * Pins the Avro reader class, as the main listener does (LibraryEventsConsumer.AVRO_READER_TYPE), and
-     * fetches small batches: with the database down every record can take a connection timeout.
+     * fetches small batches: with the database down every record can take a connection timeout. Commit
+     * and isolation settings are pinned too, whatever the shared consumer config says: auto-commit on
+     * close would commit records that were fetched but never processed, and read_uncommitted would make
+     * endOffsets() the high watermark instead of the last stable offset.
      */
-    private static Properties readerProperties() {
+    static Properties readerProperties() {
         var props = new Properties();
         props.setProperty("specific.avro.value.type", LibraryEventAvro.class.getName());
         props.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "50");
+        props.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
         return props;
+    }
+
+    /**
+     * True if a record failed to deserialize because Schema Registry could not be reached (network
+     * error, or a 5xx answer): an outage, not a bad record. Each run has a fresh deserializer with an
+     * empty schema cache, so a short registry blip would otherwise dead-letter every waiting record.
+     */
+    static boolean isRegistryUnreachable(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof IOException
+                    || t instanceof RestClientException rest && rest.getStatus() >= 500) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean awaitAssignment(Consumer<Object, Object> consumer) {
@@ -217,13 +242,26 @@ public class RetryTopicDrainer {
     private void process(ConsumerRecord<Object, Object> record) {
         try {
             DeserializationException notAvro = SerializationUtils.getExceptionFromHeader(
-                    record, SerializationUtils.VALUE_DESERIALIZER_EXCEPTION_HEADER, LOG_ACCESSOR);
+                    record, KafkaUtils.VALUE_DESERIALIZER_EXCEPTION_HEADER, LOG_ACCESSOR);
+            if (notAvro != null && isRegistryUnreachable(notAvro)) {
+                throw new RegistryUnreachableException(notAvro);   // ends the run; nothing committed for it
+            }
             if (notAvro != null) {
                 throw notAvro;   // value is null; the DLT gets the original bytes from the header
             }
             libraryEventsService.processLibraryEvent((ConsumerRecord<Integer, LibraryEventAvro>) (ConsumerRecord<?, ?>) record);
+        } catch (RegistryUnreachableException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ProcessingFailedException(e);
+        }
+    }
+
+    /** Schema Registry could not be reached: not the record's fault, so the run stops without committing it. */
+    private static final class RegistryUnreachableException extends RuntimeException {
+
+        RegistryUnreachableException(Throwable cause) {
+            super("Schema Registry unreachable; the record waits for the next run", cause);
         }
     }
 

@@ -139,10 +139,13 @@ class RetryTopicIntegrationTest {
         doThrow(new RecoverableDataAccessException("database down"))
                 .when(serviceSpy).processLibraryEvent(argThat(isBook("Retry-Once")));
 
-        kafkaTemplate.executeInTransaction(t -> t.sendDefault(9101, event));
+        var original = new ProducerRecord<Integer, Object>(MAIN_TOPIC, null, 9101, event);
+        original.headers().add("event-source", "scanner".getBytes(UTF_8));
+        kafkaTemplate.executeInTransaction(t -> t.send(original));
 
         var forwarded = awaitRecord(RETRY_TOPIC, r -> event.equals(AvroEvents.decode(RETRY_TOPIC, r.value())));
         assertThat(headerValues(forwarded, RetryRouter.ATTEMPT_HEADER)).containsExactly("1");
+        assertThat(headerValues(forwarded, "event-source")).as("producer headers are kept").containsExactly("scanner");
         assertThat(headerValues(forwarded, "kafka_dlt-original-topic")).containsExactly(MAIN_TOPIC);
         assertThat(readAll(MAIN_TOPIC).stream().filter(r -> isEvent(event, MAIN_TOPIC, r)).count())
                 .as("records for the event on library-events (a re-publish loop would add more)")
@@ -203,10 +206,16 @@ class RetryTopicIntegrationTest {
             record.headers().add(RetryRouter.ATTEMPT_HEADER, "1".getBytes(UTF_8));
             producer.send(record).get();
         }
+        var good = new ProducerRecord<Integer, Object>(RETRY_TOPIC, 1, 9400, newEvent(9400, "Retry-After-Bad"));
+        good.headers().add(RetryRouter.ATTEMPT_HEADER, "1".getBytes(UTF_8));
+        kafkaTemplate.executeInTransaction(t -> t.send(good));
 
-        drainer.drainOnce();
+        var result = drainer.drainOnce();
 
         assertThat(awaitRecord(DLT_TOPIC, r -> Arrays.equals(r.value(), garbage))).isNotNull();
+        assertThat(result.deadLettered()).as("the bad record").isGreaterThanOrEqualTo(1);
+        assertThat(libraryEventsRepository.findAll()).as("the record after it, same partition, same run")
+                .anySatisfy(saved -> assertThat(saved.getBook().getBookName()).isEqualTo("Retry-After-Bad"));
     }
 
     @Test
@@ -388,16 +397,20 @@ class RetryTopicIntegrationTest {
         }
     }
 
-    /** Every record currently on the topic: reads from the beginning until two polls come back empty. */
+    /** Every record currently on the topic: reads from the beginning up to its end offsets (15 s at most). */
     private List<ConsumerRecord<byte[], byte[]>> readAll(String topic) {
         try (Consumer<byte[], byte[]> reader = newReader()) {
             reader.subscribe(List.of(topic));
             var all = new ArrayList<ConsumerRecord<byte[], byte[]>>();
-            int emptyPolls = 0;
-            while (emptyPolls < 2 || reader.assignment().isEmpty()) {
-                var records = reader.poll(Duration.ofMillis(500));
-                records.forEach(all::add);
-                emptyPolls = records.isEmpty() ? emptyPolls + 1 : 0;
+            long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+            while (reader.assignment().isEmpty()) {
+                assertThat(System.nanoTime()).as("partitions of %s assigned within 15 s", topic).isLessThan(deadline);
+                reader.poll(Duration.ofMillis(200)).forEach(all::add);
+            }
+            var end = reader.endOffsets(reader.assignment());
+            while (end.entrySet().stream().anyMatch(e -> reader.position(e.getKey()) < e.getValue())) {
+                assertThat(System.nanoTime()).as("%s read to its end within 15 s", topic).isLessThan(deadline);
+                reader.poll(Duration.ofMillis(200)).forEach(all::add);
             }
             return all;
         }

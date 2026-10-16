@@ -3,6 +3,7 @@ package com.learnkafka.retry;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -25,10 +26,10 @@ import java.time.Duration;
 public record RetryProperties(
         @NotBlank String topic,
         @NotBlank String groupId,
-        @NotNull Duration interval,
+        @NotNull @DurationMin(millis = 1) Duration interval,
         @Min(1) int maxAttempts,
-        @NotNull Duration maxRun,
-        Duration delay
+        @NotNull @DurationMin(millis = 1) Duration maxRun,
+        @DurationMin(millis = 0) Duration delay
 ) {
 
     public RetryProperties {

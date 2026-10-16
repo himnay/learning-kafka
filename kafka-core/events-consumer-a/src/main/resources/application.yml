@@ -19,7 +19,7 @@ spring:
       default-topic: library-events
     properties:
       # Confluent Schema Registry (kafka-core docker compose) — used by both the Avro
-      # deserializer (consuming) and the Avro serializer (DLT / recovery re-publish)
+      # deserializer (consuming) and the Avro serializer (state topic, retry topic, DLT)
       schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
       sasl.mechanism: SCRAM-SHA-512
       sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_USERNAME:events-consumer}" password="${KAFKA_PASSWORD:events-consumer-secret}";
