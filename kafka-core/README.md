@@ -881,6 +881,7 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | `spring.datasource.hikari.connection-timeout` (consumers) | `5000` | fail fast while PostgreSQL is down, so records move on to the retry topic |
 | `spring.datasource.*`, `spring.flyway.schemas` (producer) | `library` database, schema `coffee` | the coffee outbox ([§32](#32-transactional-outbox-for-coffee-orders-debezium)) |
 | `app.coffee.partitions` (producer) | `3` | the VIP rule hashes non-VIP orders over partitions 1..N-1; checked against `coffee-orders` at startup |
+| `app.coffee.outbox-slot` / `app.coffee.require-outbox-slot` (producer) | `coffee_outbox_slot` / `true` | without that slot (or `wal_level=logical`) orders would be accepted but never published, so the producer refuses to start; `false` only warns (tests) |
 | `app.coffee.share-group.enabled` | `true` (default) | turns the barista share-group listener on/off ([§24](#24-share-groups-kafka-as-a-queue)) |
 | `spring.jpa.hibernate.ddl-auto` | `validate` | Flyway owns the schema |
 | `spring.jpa.open-in-view` | `false` | no lazy loading outside transactions |
@@ -940,6 +941,7 @@ curl -X POST localhost:8080/v1/coffee-orders -H 'Content-Type: application/json'
   -d '{"name": "Ada", "nickName": "Countess"}'
 ```
 
+- ***Coffee orders need the outbox infrastructure*** — PostgreSQL with `wal_level=logical` and Debezium's replication slot, both from `docker compose up -d`. Without them the producer refuses to start (`OutboxCaptureCheck`, [§32](#32-transactional-outbox-for-coffee-orders-debezium)); `--app.coffee.require-outbox-slot=false` starts it anyway, and orders are then stored but not published.
 - More ready-made requests (all PUT variants, DLT cases, coffee orders, Schema Registry, actuator) are in this module's [`insomnia-collection.json`](insomnia-collection.json).
 - If port `8080` is already taken on your machine, start the producer with `--server.port=8090` (or `-Dspring-boot.run.arguments=--server.port=8090`).
 - The repo-root `docker-compose.yml` is this stack plus Prometheus (`9091`) and Grafana (`3001`) — not a second Kafka, so there is nothing to keep apart.
@@ -1474,7 +1476,7 @@ No Schema Registry container is needed: tests point `schema.registry.url` at ***
 | Module | Tests | What they cover |
 |---|---|---|
 | `schemas` | 5 | `EventMetadataTest` — Java ↔ Avro round trip, reading metadata from any event, legacy events without it |
-| `events-producer` | 47 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `VipPartitionRuleTest` (VIP → P0, others never P0, same key → same partition, same arithmetic as the old partitioner); `CoffeeOutboxIntegrationTest` (real PostgreSQL with `wal_level=logical`: a `test_decoding` replication slot shows exactly what Debezium reads — order INSERT, outbox INSERT, outbox DELETE in one transaction — plus the Avro payload, VIP → partition 0, a NULL correlation id, and the rollback when the outbox write fails); `CoffeeSchemaIntegrationTest` (Flyway creates the `coffee` schema); `CoffeeTopicCheckTest` (partition-count check); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersControllerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key; for an explicit partition, 201 from that partition and 400 for partitions 3 and -1); `ExplicitPartitionIntegrationTest` (a VIP key sent to partition 2 lands on 2, not on the VIP rule's 0; a missing partition is a 400 at once, not a 60 s wait) |
+| `events-producer` | 55 | `LibraryEventControllerUnitTest` (incl. metadata stamping, `X-Correlation-Id`, `400` for a NEW with an id); `VipPartitionRuleTest` (VIP → P0, others never P0, same key → same partition, same arithmetic as the old partitioner); `CoffeeOutboxIntegrationTest` (real PostgreSQL with `wal_level=logical`: a `test_decoding` replication slot shows exactly what Debezium reads — order INSERT, outbox INSERT, outbox DELETE in one transaction — plus the Avro payload, VIP → partition 0, a NULL correlation id, and the rollback when the outbox write fails); `CoffeeSchemaIntegrationTest` (Flyway creates the `coffee` schema); `CoffeeTopicCheckTest` (partition-count check, an unresolvable Kafka host only warns) and `CoffeeTopicCheckEmbeddedKafkaTest` (a too-small topic refuses to start); `OutboxCaptureCheckTest` / `OutboxCaptureCheckIntegrationTest` (`wal_level` not logical or no slot → refuse to start, slot present → start, not required → warning); `KeySubstringPartitionerTest` (12: pinned and hashed substrings, first match wins, unmatched keys hash exactly like Kafka's built-in partitioner, case-sensitive, keyless records, out-of-range pin, rule parsing and `ConfigException`s); `LibraryEventsControllerIntegrationTest` ([`@EmbeddedKafka`][EmbeddedKafka]) reads the published record back with `KafkaAvroDeserializer` and compares the Avro object; `KeyRoutingIntegrationTest` (VIP → P0, UK → P1, US → P2 through the real producer, and the consumed records sit where the responses said); `CompressionIntegrationTest` (500-event burst: `compression-rate-avg` below 0.5, all read back); controller and producer unit tests; `CoffeeOrdersControllerTest` and `KeyRoutingProducerTest` (201 with the result, 400 on a blank name or key; for an explicit partition, 201 from that partition and 400 for partitions 3 and -1); `ExplicitPartitionIntegrationTest` (a VIP key sent to partition 2 lands on 2, not on the VIP rule's 0; a missing partition is a 400 at once, not a 60 s wait) |
 | `events-consumer-a` / `-b` | 42 each | see below (consumer-b runs them on the KIP-848 protocol) |
 
 Library consumer tests (identical in a and b):
@@ -1529,7 +1531,7 @@ Schema `coffee` (Flyway, `V1__create_coffee_order_and_outbox_event.sql`) in the 
 |---|---|---|
 | `connector.class` | `io.debezium.connector.postgresql.PostgresConnector` | Debezium ***3.7.0.Final*** (as of 2026), downloaded by the one-shot `debezium-plugin` service: Confluent Hub only has 3.2.x and the Connect image has no `curl` |
 | `plugin.name` | `pgoutput` | PostgreSQL's built-in logical decoding plugin |
-| `slot.name` / `publication.name` | `coffee_outbox_slot` / `coffee_outbox_publication` | the replication slot keeps WAL until Debezium has read it |
+| `slot.name` / `publication.name` | `coffee_outbox_slot` / `coffee_outbox_publication` | the replication slot keeps WAL until Debezium has read it; both are created up front by `outbox-slot-init`, and Debezium reuses them |
 | `publication.autocreate.mode` | `all_tables` | a `filtered` publication needs `coffee.outbox_event` to exist when the connector starts — but the producer's Flyway creates it only when the producer first runs |
 | `table.include.list` | `coffee.outbox_event` | only outbox changes become events |
 | `snapshot.mode` | `no_data` | stream from now on; the table is always empty anyway |
@@ -1544,14 +1546,14 @@ PostgreSQL runs with `wal_level=logical` (compose `command`). The `library` user
 
 ### <span style="color:hsl(351,80%,58%)">Delivery semantics</span>
 
-- ***Atomic on the producer side*** — a `201` means order and event are both committed, even if Kafka or Kafka Connect is down at that moment.
+- ***Atomic on the producer side*** — a `201` means order and event are both committed, even if Kafka or Kafka Connect is down at that moment. The replication slot keeps the event in the WAL until Debezium reads it, so the slot must exist ***before*** the first order: compose creates it as soon as PostgreSQL is up (`outbox-slot-init`), and `OutboxCaptureCheck` makes the producer ***refuse to start*** without it, or with `wal_level` below `logical` — an order written then would be stored but its event lost for good.
 - ***At-least-once to Kafka*** — after a crash the connector resumes from its stored WAL position and can send an event again. The coffee consumers only log, so a duplicate is harmless; a consumer that changes state would dedupe on the `id` header (the event id), as the library consumers do with `processed_event` ([§13](#13-idempotency-producer-and-consumer)).
 - ***Order*** — WAL order, one connector task.
 - ***Consumers unchanged*** — same topic, key type and Avro bytes. New headers `id`, `event-type`, `correlation-id`; without `X-Correlation-Id` the `correlation-id` header is there with a null value.
 
 ### <span style="color:hsl(128,80%,45%)">Running it</span>
 
-`docker compose up -d` in `kafka-core` does it all: `debezium-plugin` downloads the plugin once into the `kafka-core-connect-plugins` volume, `kafka-connect` waits for it (and is healthy only once both the JDBC sink and the Debezium plugin are loaded), and `kafka-connect-init` registers both connectors. On a stack that is already running, the same command recreates `postgres` (new `wal_level`) and `kafka-connect`.
+`docker compose up -d` in `kafka-core` does it all: `debezium-plugin` downloads the plugin once into the `kafka-core-connect-plugins` volume (a version marker is written last, so a failed or partial download is retried, and a version bump installs the new plugin), `outbox-slot-init` creates the publication and the replication slot as soon as PostgreSQL is healthy, `kafka-connect` waits for both (and is healthy only once both the JDBC sink and the Debezium plugin are loaded), and `kafka-connect-init` registers both connectors. Start the producer after that: until the slot exists it refuses to start. On a stack that is already running, the same command recreates `postgres` (new `wal_level`) and `kafka-connect`.
 
 ```bash
 curl -s localhost:8083/connectors/coffee-outbox/status        # connector and task RUNNING
@@ -1559,7 +1561,7 @@ docker exec kafka-core-postgres psql -U library -d library \
   -c "select slot_name, plugin, active, confirmed_flush_lsn from pg_replication_slots"
 ```
 
-- ***Tearing down*** — a replication slot keeps WAL until it is read. If you delete the connector but keep PostgreSQL, drop the slot: `select pg_drop_replication_slot('coffee_outbox_slot');`.
+- ***Tearing down*** — a replication slot keeps WAL until it is read. If you delete the connector but keep PostgreSQL, drop the slot: `select pg_drop_replication_slot('coffee_outbox_slot');` — but orders written after that are never published, which is why the producer refuses to start without the slot. `docker compose up outbox-slot-init` creates it again.
 
 ***Real run*** — Debezium 3.7.0.Final on `cp-kafka-connect:8.3.2` against this 3-broker cluster (producer on `:18080`, beside a running stack):
 

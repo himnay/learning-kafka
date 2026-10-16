@@ -407,7 +407,7 @@ cd kafka-core && mvn test
 | Module | Tests |
 |---|---|
 | `kafka-core/schemas` | 5 — base-event metadata (Java ↔ Avro) |
-| `kafka-core/events-producer` | 47 — incl. the key-substring partitioner and VIP rule, the coffee outbox against a real PostgreSQL (logical decoding), key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
+| `kafka-core/events-producer` | 55 — incl. the key-substring partitioner and VIP rule, the coffee outbox against a real PostgreSQL (logical decoding) and its startup checks, key routing end to end, explicit partitions, and a compression test (500-event burst, `compression-rate-avg` < 0.5) |
 | `kafka-core/events-consumer-a` / `-b` | 42 each (b on the KIP-848 protocol) — incl. the retry topic, a real database outage and the scheduled drain |
 | `kafka-stream/orders-streams-app` | 21 — topology incl. windows (and their retention) and the stores join, REST layer, Spring/EmbeddedKafka integration, config (zstd producer) |
 
