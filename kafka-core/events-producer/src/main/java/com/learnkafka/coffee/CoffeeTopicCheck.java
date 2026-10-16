@@ -66,8 +66,10 @@ public class CoffeeTopicCheck implements ApplicationRunner {
     }
 
     private OptionalInt describe() {
-        AdminClient admin = AdminClient.create(kafkaAdmin.getConfigurationProperties());
+        AdminClient admin = null;
         try {
+            // inside the try: an unresolvable bootstrap host already fails here (KafkaException)
+            admin = AdminClient.create(kafkaAdmin.getConfigurationProperties());
             var description = admin.describeTopics(List.of(CoffeeOrderService.TOPIC)).allTopicNames()
                     .get(DESCRIBE_TIMEOUT_SECONDS, TimeUnit.SECONDS).get(CoffeeOrderService.TOPIC);
             return OptionalInt.of(description.partitions().size());
@@ -77,7 +79,9 @@ public class CoffeeTopicCheck implements ApplicationRunner {
         } catch (ExecutionException | TimeoutException | KafkaException e) {
             return OptionalInt.empty();
         } finally {
-            admin.close(Duration.ofSeconds(2));
+            if (admin != null) {
+                admin.close(Duration.ofSeconds(2));
+            }
         }
     }
 }
