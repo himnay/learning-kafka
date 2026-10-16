@@ -9,6 +9,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsConfig;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.KafkaStreamsDefaultConfiguration;
@@ -41,8 +42,15 @@ public class OrdersStreamsConfiguration {
     public KafkaStreamsConfiguration kStreamConfig(
             @Value("${spring.kafka.streams.bootstrap-servers}") String bootstrapServers,
             @Value("${spring.kafka.streams.application-id}") String applicationId,
-            @Value("${spring.kafka.streams.state-dir:}") String stateDir) {
+            @Value("${spring.kafka.streams.state-dir:}") String stateDir,
+            KafkaProperties kafkaProperties) {
         var props = new HashMap<String, Object>();
+        // This bean replaces Boot's streams configuration, so the shared client settings have to be copied
+        // in: spring.kafka.properties (sasl.mechanism, sasl.jaas.config), security.protocol and the
+        // truststore — SASL_SSL to the kafka-core cluster's host listener.
+        props.putAll(kafkaProperties.getProperties());
+        props.putAll(kafkaProperties.getSecurity().buildProperties());
+        props.putAll(kafkaProperties.getSsl().buildProperties());
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
         // KTables are cached and only flushed DOWNSTREAM on commit (default every 30 s with at-least-once).

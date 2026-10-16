@@ -8,6 +8,19 @@ spring:
     problemdetails:
       enabled: true
   kafka:
+    # The kafka-core cluster's host listener is SASL_SSL: TLS (truststore holding the dev CA from the
+    # kafka-certs compose service) + SCRAM-SHA-512 (user created by kafka-init).
+    # Env overrides: KAFKA_USERNAME, KAFKA_PASSWORD, KAFKA_TRUSTSTORE, KAFKA_TRUSTSTORE_PASSWORD.
+    security:
+      protocol: SASL_SSL
+    ssl:
+      trust-store-location: file:${KAFKA_TRUSTSTORE:../../kafka-core/certs/kafka.truststore.p12}
+      trust-store-password: ${KAFKA_TRUSTSTORE_PASSWORD:kafka-dev-secret}
+      trust-store-type: PKCS12
+    properties:
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_USERNAME:orders-streams}" password="${KAFKA_PASSWORD:orders-streams-secret}";
+    # OrdersStreamsConfiguration copies these into its own Kafka Streams configuration
     streams:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}   # any broker of the kafka-core cluster
       application-id: orders-kafka-streams

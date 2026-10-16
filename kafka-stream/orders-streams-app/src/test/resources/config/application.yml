@@ -1,0 +1,7 @@
+# Test-only settings, loaded on top of src/main/resources/application.yml
+# (Spring Boot reads classpath:config/application.yml after classpath:application.yml).
+spring:
+  kafka:
+    # Tests run against plaintext embedded / Testcontainers brokers, not the SASL_SSL host listener
+    security:
+      protocol: PLAINTEXT

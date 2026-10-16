@@ -10,6 +10,8 @@ import org.apache.kafka.streams.errors.ProductionExceptionHandler;
 import org.apache.kafka.streams.errors.ProductionExceptionHandler.SerializationExceptionOrigin;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.kafka.streams.RecoveringDeserializationExceptionHandler;
 
 import java.util.Properties;
@@ -21,7 +23,7 @@ import static org.mockito.Mockito.mock;
 class OrdersStreamsConfigurationTest {
 
     private final Properties props = new OrdersStreamsConfiguration()
-            .kStreamConfig("localhost:9092", "orders-test", "")
+            .kStreamConfig("localhost:9092", "orders-test", "", new KafkaProperties())
             .asProperties();
 
     @Test
@@ -35,6 +37,33 @@ class OrdersStreamsConfigurationTest {
         assertThat(config.getConfiguredInstance(StreamsConfig.PRODUCTION_EXCEPTION_HANDLER_CLASS_CONFIG,
                 ProductionExceptionHandler.class))
                 .isInstanceOf(StreamsSerializationExceptionHandler.class);
+    }
+
+    @Test
+    @DisplayName("SASL/SSL settings from spring.kafka.* reach Kafka Streams (this bean replaces Boot's, so it copies them)")
+    void securitySettingsReachKafkaStreams() {
+        var jaas = "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"orders-streams\" password=\"x\";";
+        var kafka = new KafkaProperties();
+        kafka.getSecurity().setProtocol("SASL_SSL");
+        kafka.getProperties().put("sasl.mechanism", "SCRAM-SHA-512");
+        kafka.getProperties().put("sasl.jaas.config", jaas);
+        kafka.getSsl().setTrustStoreLocation(new FileSystemResource("/tmp/kafka.truststore.p12"));
+        kafka.getSsl().setTrustStoreType("PKCS12");
+
+        var secured = new OrdersStreamsConfiguration().kStreamConfig("localhost:9092", "orders-test", "", kafka).asProperties();
+
+        assertThat(secured)
+                .containsEntry("security.protocol", "SASL_SSL")
+                .containsEntry("sasl.mechanism", "SCRAM-SHA-512")
+                .containsEntry("sasl.jaas.config", jaas)
+                .containsEntry("ssl.truststore.type", "PKCS12");
+        assertThat(secured.getProperty("ssl.truststore.location")).endsWith("kafka.truststore.p12");
+    }
+
+    @Test
+    @DisplayName("without security settings Kafka Streams connects in plaintext")
+    void plaintextByDefault() {
+        assertThat(props).doesNotContainKey("sasl.mechanism").doesNotContainKey("security.protocol");
     }
 
     @Test

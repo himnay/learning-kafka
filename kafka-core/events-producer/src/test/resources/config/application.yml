@@ -5,3 +5,8 @@ app:
     # The Testcontainers database has no Debezium replication slot: warn instead of refusing to start.
     # OutboxCaptureCheckIntegrationTest checks the refusing path itself.
     require-outbox-slot: false
+spring:
+  kafka:
+    # Tests run against plaintext embedded / Testcontainers brokers, not the SASL_SSL host listener
+    security:
+      protocol: PLAINTEXT

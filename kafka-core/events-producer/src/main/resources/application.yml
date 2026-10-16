@@ -6,6 +6,18 @@ spring:
       enabled: true
   kafka:
     bootstrap-servers: localhost:9092          # any broker of the 3-node cluster; clients discover the rest
+    # The kafka-core cluster's host listener is SASL_SSL: TLS (truststore holding the dev CA from the
+    # kafka-certs compose service) + SCRAM-SHA-512 (user created by kafka-init).
+    # Env overrides: KAFKA_USERNAME, KAFKA_PASSWORD, KAFKA_TRUSTSTORE, KAFKA_TRUSTSTORE_PASSWORD.
+    security:
+      protocol: SASL_SSL
+    ssl:
+      trust-store-location: file:${KAFKA_TRUSTSTORE:../certs/kafka.truststore.p12}
+      trust-store-password: ${KAFKA_TRUSTSTORE_PASSWORD:kafka-dev-secret}
+      trust-store-type: PKCS12
+    properties:
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_USERNAME:events-producer}" password="${KAFKA_PASSWORD:events-producer-secret}";
     template:
       default-topic: library-events
     producer:
