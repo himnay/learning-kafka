@@ -9,11 +9,52 @@ services:
   #                 the LEADER, the other two are FOLLOWERS (spread across nodes)
   #   - controller: all 3 are quorum voters; Raft elects ONE active controller,
   #                 the other 2 are hot standbys (tolerates 1 node down)
-  # Host ports: 9092 / 9093 / 9094 — clients bootstrap from any of them.
+  # Host ports: 9092 / 9093 / 9094 — clients bootstrap from any of them, over SASL_SSL (SCRAM-SHA-512);
+  # inside docker, kafka-N:29092 stays plaintext (Schema Registry, Connect, Kafdrop, kafka-init).
+
+  # ── One-shot: dev certificate authority, broker keystores, client truststore ──
+  # Written once into ./certs (git-ignored): ca.crt, kafka-N.keystore.p12 (SAN localhost + kafka-N,
+  # signed by the CA) and kafka.truststore.p12 (the CA) for the apps. To regenerate, delete
+  # certs/* except .gitignore and run docker compose up -d again.
+  kafka-certs:
+    image: confluentinc/cp-kafka:8.3.2
+    container_name: kafka-core-kafka-certs
+    volumes:
+      - ./certs:/certs
+    environment:
+      CERT_PASSWORD: ${KAFKA_SSL_PASSWORD:-kafka-dev-secret}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        cd /certs
+        if [ -f kafka.truststore.p12 ]; then echo "certificates already exist"; exit 0; fi
+        rm -f ca.p12 ca.crt kafka-*.keystore.p12 kafka-*.csr kafka-*.crt   # leftovers of an interrupted run
+        P="$$CERT_PASSWORD"
+        keytool -genkeypair -alias ca -keyalg RSA -keysize 2048 -validity 3650 \
+          -dname "CN=kafka-core dev CA" -ext bc:c -keystore ca.p12 -storetype PKCS12 -storepass "$$P"
+        keytool -exportcert -alias ca -keystore ca.p12 -storepass "$$P" -rfc -file ca.crt
+        for n in 1 2 3; do
+          ks=kafka-$$n.keystore.p12
+          keytool -genkeypair -alias kafka-$$n -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=kafka-$$n" \
+            -ext SAN=dns:localhost,dns:kafka-$$n -keystore "$$ks" -storetype PKCS12 -storepass "$$P"
+          keytool -certreq -alias kafka-$$n -keystore "$$ks" -storepass "$$P" -file kafka-$$n.csr
+          keytool -gencert -alias ca -keystore ca.p12 -storepass "$$P" -infile kafka-$$n.csr -outfile kafka-$$n.crt \
+            -rfc -validity 3650 -ext SAN=dns:localhost,dns:kafka-$$n -ext eku=serverAuth
+          keytool -importcert -noprompt -alias ca -file ca.crt -keystore "$$ks" -storepass "$$P"
+          keytool -importcert -alias kafka-$$n -file kafka-$$n.crt -keystore "$$ks" -storepass "$$P"
+          rm kafka-$$n.csr kafka-$$n.crt
+        done
+        # written last: its presence means a complete set
+        keytool -importcert -noprompt -alias ca -file ca.crt -keystore kafka.truststore.p12 -storetype PKCS12 -storepass "$$P"
+        ls -l
+    restart: "no"
 
   kafka-1:
     image: confluentinc/cp-kafka:8.3.2
     container_name: kafka-core-kafka-1
+    depends_on:
+      kafka-certs: { condition: service_completed_successfully }
     ports:
       - "9092:9092"
     environment: &kafka-env
@@ -22,9 +63,18 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093
 
       # Listeners
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:29093,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:SASL_SSL
+      KAFKA_LISTENERS: PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,EXTERNAL://localhost:9092
+      # Host listener EXTERNAL = SASL_SSL: TLS with the broker certificate from kafka-certs, then SCRAM-SHA-512
+      # (users created by kafka-init). Not named SASL_SSL on purpose: a listener name containing SSL/SASL_
+      # makes the cp image demand its own secrets files and a JAAS file in KAFKA_OPTS.
+      KAFKA_LISTENER_NAME_EXTERNAL_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_LISTENER_NAME_EXTERNAL_SCRAM___SHA___512_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required;"
+      KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEYSTORE_TYPE: PKCS12
+      KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-1.keystore.p12
+      KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD:-kafka-dev-secret}
+      KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEY_PASSWORD: ${KAFKA_SSL_PASSWORD:-kafka-dev-secret}
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
 
@@ -43,6 +93,7 @@ services:
 
     volumes:
       - kafka-core-kafka-1-data:/var/lib/kafka/data
+      - ./certs:/etc/kafka/secrets:ro
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka-1:29092"]
       interval: 15s
@@ -53,15 +104,19 @@ services:
   kafka-2:
     image: confluentinc/cp-kafka:8.3.2
     container_name: kafka-core-kafka-2
+    depends_on:
+      kafka-certs: { condition: service_completed_successfully }
     ports:
       - "9093:9093"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 2
-      KAFKA_LISTENERS: PLAINTEXT://kafka-2:29092,CONTROLLER://kafka-2:29093,PLAINTEXT_HOST://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://kafka-2:29092,CONTROLLER://kafka-2:29093,EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,EXTERNAL://localhost:9093
+      KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-2.keystore.p12
     volumes:
       - kafka-core-kafka-2-data:/var/lib/kafka/data
+      - ./certs:/etc/kafka/secrets:ro
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka-2:29092"]
       interval: 15s
@@ -72,15 +127,19 @@ services:
   kafka-3:
     image: confluentinc/cp-kafka:8.3.2
     container_name: kafka-core-kafka-3
+    depends_on:
+      kafka-certs: { condition: service_completed_successfully }
     ports:
       - "9094:9094"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 3
-      KAFKA_LISTENERS: PLAINTEXT://kafka-3:29092,CONTROLLER://kafka-3:29093,PLAINTEXT_HOST://0.0.0.0:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENERS: PLAINTEXT://kafka-3:29092,CONTROLLER://kafka-3:29093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-3.keystore.p12
     volumes:
       - kafka-core-kafka-3-data:/var/lib/kafka/data
+      - ./certs:/etc/kafka/secrets:ro
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka-3:29092"]
       interval: 15s
@@ -94,6 +153,10 @@ services:
   kafka-init:
     image: confluentinc/cp-kafka:8.3.2
     container_name: kafka-core-kafka-init
+    environment:
+      EVENTS_PRODUCER_KAFKA_PASSWORD: ${EVENTS_PRODUCER_KAFKA_PASSWORD:-events-producer-secret}
+      EVENTS_CONSUMER_KAFKA_PASSWORD: ${EVENTS_CONSUMER_KAFKA_PASSWORD:-events-consumer-secret}
+      ORDERS_STREAMS_KAFKA_PASSWORD: ${ORDERS_STREAMS_KAFKA_PASSWORD:-orders-streams-secret}
     depends_on:
       kafka-1: { condition: service_healthy }
       kafka-2: { condition: service_healthy }
@@ -112,6 +175,12 @@ services:
           --topic library-book-state --partitions 3 --replication-factor 3 \
           --config min.insync.replicas=2 --config cleanup.policy=compact \
           --config segment.ms=60000 --config min.cleanable.dirty.ratio=0.01
+        # SCRAM-SHA-512 users for the apps on the host (EXTERNAL listener); re-running replaces the credentials
+        for u in "events-producer:$${EVENTS_PRODUCER_KAFKA_PASSWORD}" "events-consumer:$${EVENTS_CONSUMER_KAFKA_PASSWORD}" \
+                 "orders-streams:$${ORDERS_STREAMS_KAFKA_PASSWORD}"; do
+          kafka-configs --bootstrap-server kafka-1:29092 --alter --entity-type users --entity-name "$${u%%:*}" \
+            --add-config "SCRAM-SHA-512=[iterations=8192,password=$${u#*:}]"
+        done
         kafka-topics --bootstrap-server kafka-1:29092 --describe --topic library-events
         kafka-metadata-quorum --bootstrap-server kafka-1:29092 describe --status
     restart: "no"
