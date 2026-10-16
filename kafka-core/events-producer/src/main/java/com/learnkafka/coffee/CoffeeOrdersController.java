@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST endpoint for coffee orders. A 201 means the order and its event are committed in PostgreSQL;
  * Debezium publishes the event to "coffee-orders" right after, even if Kafka was down at that moment.
+ * That holds only while PostgreSQL keeps the event for Debezium (wal_level=logical and the replication
+ * slot exist), so the app refuses to start without them: see OutboxCaptureCheck.
  */
 @Slf4j
 @RestController

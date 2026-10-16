@@ -171,10 +171,43 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        if [ -d /plugins/debezium-connector-postgres ]; then echo "Debezium plugin already installed"; exit 0; fi
-        curl -fsSL https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/3.7.0.Final/debezium-connector-postgres-3.7.0.Final-plugin.tar.gz \
-          | tar -xz -C /plugins
-        ls /plugins
+        set -eu
+        # the marker names the version: a half-finished download never counts as installed,
+        # and bumping the version installs the new plugin
+        MARKER=/plugins/.debezium-connector-postgres-3.7.0.Final
+        if [ -f "$$MARKER" ]; then echo "Debezium plugin 3.7.0.Final already installed"; exit 0; fi
+        TMP=$$(mktemp -d)
+        curl -fsSL -o "$$TMP/plugin.tar.gz" \
+          https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/3.7.0.Final/debezium-connector-postgres-3.7.0.Final-plugin.tar.gz
+        tar -xzf "$$TMP/plugin.tar.gz" -C "$$TMP"
+        rm -rf /plugins/debezium-connector-postgres /plugins/.debezium-connector-postgres-*
+        mv "$$TMP/debezium-connector-postgres" /plugins/
+        rm -rf "$$TMP"
+        touch "$$MARKER"
+        ls -A /plugins
+    restart: "no"
+
+  # ── One-shot: replication slot + publication for the coffee outbox ─────────
+  # Created as soon as PostgreSQL is up, before any order can be written. The outbox row is deleted in
+  # the same transaction, so an order committed before the slot exists would never reach Kafka;
+  # with the slot in place PostgreSQL keeps every change until Debezium (which reuses both) reads it.
+  outbox-slot-init:
+    image: postgres:19beta3
+    container_name: kafka-core-outbox-slot-init
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGPASSWORD: library
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        psql -h postgres -U library -d library -v ON_ERROR_STOP=1 <<'SQL'
+        SELECT 'CREATE PUBLICATION coffee_outbox_publication FOR ALL TABLES'
+          WHERE NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'coffee_outbox_publication') \gexec
+        SELECT slot_name, lsn FROM pg_create_logical_replication_slot('coffee_outbox_slot', 'pgoutput')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'coffee_outbox_slot');
+        SELECT slot_name, plugin, active FROM pg_replication_slots WHERE slot_name = 'coffee_outbox_slot';
+        SQL
     restart: "no"
 
   # ── Kafka Connect — replicate library-events into PostgreSQL table "events" ──
@@ -194,6 +227,7 @@ services:
       schema-registry: { condition: service_healthy }
       postgres: { condition: service_healthy }
       debezium-plugin: { condition: service_completed_successfully }
+      outbox-slot-init: { condition: service_completed_successfully }
     ports:
       - "8083:8083"   # Connect REST API
     volumes:

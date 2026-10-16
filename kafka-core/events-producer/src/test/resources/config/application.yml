@@ -1,0 +1,7 @@
+# Test-only settings, loaded on top of src/main/resources/application.yml
+# (Spring Boot reads classpath:config/application.yml after classpath:application.yml).
+app:
+  coffee:
+    # The Testcontainers database has no Debezium replication slot: warn instead of refusing to start.
+    # OutboxCaptureCheckIntegrationTest checks the refusing path itself.
+    require-outbox-slot: false

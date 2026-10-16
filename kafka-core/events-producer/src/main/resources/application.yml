@@ -43,6 +43,10 @@ app:
     vip-customers: Ada,Grace
     # coffee-orders partition count: the VIP rule hashes everyone else over partitions 1..N-1
     partitions: 3
+    # Debezium's replication slot (created by compose's outbox-slot-init). Without it, or without
+    # wal_level=logical, orders would be accepted but never published: OutboxCaptureCheck refuses to start.
+    outbox-slot: coffee_outbox_slot
+    require-outbox-slot: true
   key-routing:
     # KeySubstringPartitioner: every key containing one of these substrings goes to one partition.
     # "VIP=0" pins VIP to partition 0; a bare substring is hashed (murmur2): UK → 1, US → 2 on 3 partitions.
