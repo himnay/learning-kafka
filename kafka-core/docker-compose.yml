@@ -363,7 +363,7 @@ services:
       kafka-2: { condition: service_healthy }
       kafka-3: { condition: service_healthy }
     ports:
-      - "9001:9000"   # host 9001 (9000 often taken by local dev servers)
+      - "9001:9000"   # host 9001 (9000 often taken by local dev servers) http://localhost:9001/
     environment:
       KAFKA_BROKERCONNECT: kafka-1:29092,kafka-2:29092,kafka-3:29092
       SERVER_SERVLET_CONTEXTPATH: /

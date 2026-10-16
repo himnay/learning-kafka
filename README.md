@@ -253,7 +253,7 @@ The root `docker-compose.yml` `include:`s [`kafka-core/docker-compose.yml`](kafk
 
 | Service | URL / port | Notes |
 |---|---|---|
-| Kafka (KRaft, 3 brokers) | `localhost:9092`, `9093`, `9094` | `broker,controller` on each node; topics created by `kafka-init` |
+| Kafka (KRaft, 3 brokers) | `localhost:9092`, `9093`, `9094` | `broker,controller` on each node; topics and SCRAM users created by `kafka-init`; ***SASL_SSL*** for apps on the host ([kafka-core §30](kafka-core/README.md#30-security-sasl-scram-over-tls)) |
 | Schema Registry | http://localhost:8085 | Avro schemas |
 | PostgreSQL | `localhost:5435` (library/library) | consumer data, idempotency table, Connect replica, coffee outbox (`wal_level=logical`) |
 | Kafka Connect | http://localhost:8083 | JDBC sink → `events` table; Debezium outbox → `coffee-orders` |

@@ -31,7 +31,7 @@
 27. 🆕 [KIP-848 consumer rebalance protocol](#27-kip-848-consumer-rebalance-protocol)
 28. ⏪ [Replaying records with seek](#28-replaying-records-with-seek)
 29. 🛠️ [Kafka CLI cheat sheet](#29-kafka-cli-cheat-sheet)
-30. 🔐 [Enabling TLS (SSL) and mutual TLS](#30-enabling-tls-ssl-and-mutual-tls)
+30. 🔐 [Security: SASL/SCRAM over TLS on the host listener](#30-security-sasl-scram-over-tls)
 31. 🧪 [Tests](#31-tests)
 32. 📮 [Transactional outbox for coffee orders (Debezium)](#32-transactional-outbox-for-coffee-orders-debezium)
 
@@ -155,7 +155,7 @@ CurrentVoters: [1, 2, 3]
 | P2 | broker 1 | brokers 2, 3 |
 
 - ***Leaders are spread across brokers*** so the load is shared. Which broker leads which partition can differ from run to run.
-- ***Clients bootstrap from any broker*** (`localhost:9092` is enough). The metadata response tells them every broker's address (`localhost:9092/9093/9094`), and they talk to each partition's leader directly.
+- ***Clients bootstrap from any broker*** (`localhost:9092` is enough; over `SASL_SSL` — [§30](#30-security-sasl-scram-over-tls)). The metadata response tells them every broker's address (`localhost:9092/9093/9094`), and they talk to each partition's leader directly.
 - ***If a broker dies***, the controller elects a new leader for its partitions from the in-sync followers. Try it with `docker stop kafka-core-kafka-2` and describe the topic again ([§20](#20-inspecting-the-cluster-and-the-registry)).
 - `coffee-orders` is created by `kafka-init` (3 partitions, RF 3). Debezium writes each coffee event to the partition the producer chose ([§32](#32-transactional-outbox-for-coffee-orders-debezium)), so the topic must exist with enough partitions.
 
@@ -857,6 +857,7 @@ processed_at   TIMESTAMPTZ DEFAULT now()
 | Property | Value | Why |
 |---|---|---|
 | `spring.kafka.bootstrap-servers` | `localhost:9092` | any broker; clients discover the rest |
+| `spring.kafka.security.protocol`, `spring.kafka.ssl.trust-store-*`, `spring.kafka.properties.sasl.*` | `SASL_SSL`, `../certs/kafka.truststore.p12`, `SCRAM-SHA-512` + per-app user | the host listener ([§30](#30-security-sasl-scram-over-tls)); env `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_TRUSTSTORE` |
 | `spring.kafka.properties.schema.registry.url` | `${SCHEMA_REGISTRY_URL:http://localhost:8085}` | Avro (de)serializers |
 | `spring.kafka.consumer.value-deserializer` | `ErrorHandlingDeserializer` | wraps the Avro deserializer |
 | `spring.kafka.consumer.properties.spring.deserializer.value.delegate.class` | `KafkaAvroDeserializer` | the real deserializer |
@@ -1391,74 +1392,91 @@ B="--bootstrap-server kafka-1:29092"
 
 ---
 
-<a id="30-enabling-tls-ssl-and-mutual-tls"></a>
-## <span style="color:hsl(0,80%,58%)">30. 🔐 Enabling TLS (SSL) and mutual TLS</span>
+<a id="30-security-sasl-scram-over-tls"></a>
+## <span style="color:hsl(0,80%,58%)">30. 🔐 Security: SASL/SCRAM over TLS on the host listener</span>
 
-The compose cluster uses `PLAINTEXT` listeners to keep the demo simple. To encrypt traffic, add a TLS listener next to them. This is a reference recipe and isn't wired into `docker-compose.yml`.
+Apps on your machine connect with ***`SASL_SSL`***: the connection is encrypted with ***TLS*** (the client checks the broker's certificate against a dev CA), then the client proves who it is with a ***SCRAM-SHA-512*** user name and password. Inside docker nothing changes: brokers, Schema Registry, Kafka Connect (with Debezium), Kafdrop and `kafka-init` keep talking plaintext on the private network (as of 2026, cp 8.3.2).
 
-***1. Certificates*** — one CA signs a certificate per broker; clients trust the CA.
+| Listener | Address | Protocol | Used by |
+|---|---|---|---|
+| `CONTROLLER` | `kafka-N:29093` | `PLAINTEXT` | KRaft quorum |
+| `PLAINTEXT` | `kafka-N:29092` | `PLAINTEXT` | inter-broker, Schema Registry, Kafka Connect, Kafdrop, `kafka-init` |
+| `EXTERNAL` | `localhost:9092` / `9093` / `9094` | ***`SASL_SSL`***, `SCRAM-SHA-512` | the four apps |
 
-```bash
-# CA: certificate + private key (self-signed, for local use)
-openssl req -new -x509 -keyout ca-key -out ca-cert -days 365 -subj "/CN=local-kafka-CA"
+### <span style="color:hsl(137,80%,45%)">Certificates — `kafka-certs`</span>
 
-# Broker keystore + key pair. Put every name clients use to reach the broker in the SAN,
-# so hostname verification can stay ON.
-keytool -keystore kafka-1.keystore.jks -alias kafka-1 -validity 365 -genkey -keyalg RSA \
-  -dname "CN=kafka-1" -ext SAN=DNS:kafka-1,DNS:localhost
+A one-shot compose service (keytool from the `cp-kafka` image) writes these into `kafka-core/certs/` (git-ignored), ***only if they are missing***:
 
-# Certificate signing request → signed by the CA (copy the SAN onto the signed cert)
-keytool -keystore kafka-1.keystore.jks -alias kafka-1 -certreq -file kafka-1.csr \
-  -ext SAN=DNS:kafka-1,DNS:localhost
-openssl x509 -req -CA ca-cert -CAkey ca-key -in kafka-1.csr -out kafka-1-signed.crt \
-  -days 365 -CAcreateserial -copy_extensions copy
-keytool -printcert -v -file kafka-1-signed.crt          # inspect it
+| File | Content |
+|---|---|
+| `ca.crt`, `ca.p12` | the dev certificate authority (10 years); `ca.p12` holds its private key — dev only |
+| `kafka-N.keystore.p12` | broker N's key and certificate, signed by the CA: SAN `DNS:localhost, DNS:kafka-N`, `serverAuth` |
+| `kafka.truststore.p12` | the CA certificate — the only file the apps need |
 
-# Keystore needs the CA cert and the signed cert (in that order)
-keytool -keystore kafka-1.keystore.jks -alias CARoot  -import -file ca-cert
-keytool -keystore kafka-1.keystore.jks -alias kafka-1 -import -file kafka-1-signed.crt
+- Store password `kafka-dev-secret` (`KAFKA_SSL_PASSWORD` overrides it). The truststore is written last, so its presence means a complete set; an interrupted run starts over.
+- ***Hostname verification stays on*** (`ssl.endpoint.identification.algorithm=https`, the client default): the brokers advertise `localhost`, which every broker certificate names.
+- ***Regenerating*** — delete `certs/*` except `.gitignore`, run `docker compose up -d`, restart the apps.
 
-# Truststore for clients: trust anything the CA signed
-keytool -keystore client.truststore.jks -alias CARoot -import -file ca-cert
-```
-
-***2. Broker*** — an extra `SSL` listener (cp-kafka maps `KAFKA_*` env vars to `server.properties`):
+### <span style="color:hsl(274,80%,58%)">Brokers</span>
 
 ```yaml
-KAFKA_LISTENERS: PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:29093,PLAINTEXT_HOST://0.0.0.0:9092,SSL://0.0.0.0:9192
-KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092,SSL://localhost:9192
-KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,SSL:SSL
-KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-1.keystore.jks
-KAFKA_SSL_KEYSTORE_PASSWORD: ${KEYSTORE_PASSWORD}
-KAFKA_SSL_KEY_PASSWORD: ${KEY_PASSWORD}
+KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:SASL_SSL
+KAFKA_LISTENERS: PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:29093,EXTERNAL://0.0.0.0:9092
+KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,EXTERNAL://localhost:9092
+KAFKA_LISTENER_NAME_EXTERNAL_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+KAFKA_LISTENER_NAME_EXTERNAL_SCRAM___SHA___512_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required;"
+KAFKA_LISTENER_NAME_EXTERNAL_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-1.keystore.p12   # + type, store and key password
 ```
 
-***3. Clients*** — console tools take a properties file; Spring Boot apps use `spring.kafka.ssl.*`:
+- ***`listener.name.external.*`*** — every setting is scoped to the `EXTERNAL` listener, so the other listeners stay plaintext. The cp image maps env vars to properties as `_` → `.`, `__` → `_`, `___` → `-`, hence `SCRAM___SHA___512`.
+- ***Why the listener isn't called `SASL_SSL`*** — a listener ***name*** containing `SSL` or `SASL_` makes the cp image's start script demand its own secrets files (`KAFKA_SSL_KEYSTORE_FILENAME`, a JAAS file in `KAFKA_OPTS`).
+- ***No users in the broker's JAAS line*** — SCRAM credentials live in the cluster metadata (KRaft), not in a file.
 
-```properties
-# client-ssl.properties
-security.protocol=SSL
-ssl.truststore.location=/path/client.truststore.jks
-ssl.truststore.password=<password>
-```
+### <span style="color:hsl(51,80%,45%)">Users — `kafka-init`</span>
+
+| User | Dev password | App |
+|---|---|---|
+| `events-producer` | `events-producer-secret` | events-producer |
+| `events-consumer` | `events-consumer-secret` | events-consumer-a and -b |
+| `orders-streams` | `orders-streams-secret` | orders-streams-app |
 
 ```bash
-$K kafka-console-producer --bootstrap-server localhost:9192 --topic test-topic --command-config client-ssl.properties
+kafka-configs --bootstrap-server kafka-1:29092 --alter --entity-type users --entity-name events-producer \
+  --add-config 'SCRAM-SHA-512=[iterations=8192,password=events-producer-secret]'
 ```
+
+- Created through the internal listener; re-running replaces the credentials. `EVENTS_PRODUCER_KAFKA_PASSWORD`, `EVENTS_CONSUMER_KAFKA_PASSWORD` and `ORDERS_STREAMS_KAFKA_PASSWORD` override the passwords.
+- ***Authentication only*** — there is no authorizer and no ACLs, so an authenticated user may still read and write every topic. ACLs would add `KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer`, super users for the brokers, and grants such as `kafka-acls --add --allow-principal User:events-producer --operation Write --topic library-events`.
+
+### <span style="color:hsl(188,80%,45%)">Clients</span>
 
 ```yaml
-spring.kafka:
-  bootstrap-servers: localhost:9192
-  security.protocol: SSL
-  ssl:
-    trust-store-location: file:/path/client.truststore.jks
-    trust-store-password: ${TRUSTSTORE_PASSWORD}
+spring:
+  kafka:
+    security:
+      protocol: SASL_SSL
+    ssl:
+      trust-store-location: file:${KAFKA_TRUSTSTORE:../certs/kafka.truststore.p12}
+      trust-store-password: ${KAFKA_TRUSTSTORE_PASSWORD:kafka-dev-secret}
+      trust-store-type: PKCS12
+    properties:
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_USERNAME:events-producer}" password="${KAFKA_PASSWORD:events-producer-secret}";
 ```
 
-***4. Mutual TLS (client authentication)*** — the broker also checks the client's certificate:
+- Producers, consumers, admin clients and Kafka Streams all read `spring.kafka.security`, `spring.kafka.ssl` and `spring.kafka.properties`. The Streams app builds its own configuration bean, so `OrdersStreamsConfiguration` copies them in.
+- ***Relative truststore path*** — relative to the module directory (the IDE's and Maven's working directory); `KAFKA_TRUSTSTORE` overrides it.
+- ***Tests stay plaintext*** — each module's `src/test/resources/config/application.yml` sets `security.protocol: PLAINTEXT`, and Spring Boot loads it on top of `application.yml`.
+- ***Console tools on the host*** need a properties file (`--command-config`) with the same five settings (`security.protocol`, `sasl.mechanism`, `sasl.jaas.config`, `ssl.truststore.location`, `ssl.truststore.password`). Inside docker keep using `kafka-N:29092`.
 
-- Broker: `KAFKA_SSL_CLIENT_AUTH: required`, plus a truststore holding the CA (`KAFKA_SSL_TRUSTSTORE_LOCATION`, `KAFKA_SSL_TRUSTSTORE_PASSWORD`).
-- Client: its own keystore signed by the same CA (`ssl.keystore.location`, `ssl.keystore.password`, `ssl.key.password`, or `spring.kafka.ssl.key-store-*`). The certificate's subject becomes the Kafka principal used by ACLs.
+### <span style="color:hsl(325,80%,58%)">Verification</span>
+
+@@VERIFICATION@@
+
+### <span style="color:hsl(22,80%,58%)">Mutual TLS instead of passwords</span>
+
+- ***Broker*** — protocol `SSL` on the listener, `KAFKA_LISTENER_NAME_EXTERNAL_SSL_CLIENT_AUTH: required`, and a truststore holding the CA.
+- ***Client*** — its own keystore signed by the same CA (`spring.kafka.ssl.key-store-*`); the certificate's subject (`CN=…`) becomes the principal ACLs refer to.
 
 ***Things to know***
 

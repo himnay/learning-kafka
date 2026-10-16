@@ -229,6 +229,7 @@ One default `application.yml`, no profiles:
 | Property | Value | Notes |
 |---|---|---|
 | `spring.kafka.streams.bootstrap-servers` | `${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}` | any broker of the kafka-core cluster |
+| `spring.kafka.security.protocol`, `spring.kafka.ssl.trust-store-*`, `spring.kafka.properties.sasl.*` | `SASL_SSL`, `../../kafka-core/certs/kafka.truststore.p12`, `SCRAM-SHA-512` as `orders-streams` | the kafka-core host listener ([kafka-core §30](../kafka-core/README.md#30-security-sasl-scram-over-tls)); `OrdersStreamsConfiguration` copies them into its Streams config. Env `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_TRUSTSTORE` |
 | `spring.kafka.streams.application-id` | `orders-kafka-streams` | consumer group + prefix of internal topics |
 | `spring.kafka.streams.state-dir` | unset (→ `<tmp>/kafka-streams`) | where RocksDB keeps the stores |
 | `server.port` | `8082` | REST API + Actuator |

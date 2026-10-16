@@ -1,3 +1,6 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: events-producer
@@ -63,9 +66,6 @@ app:
     # KeySubstringPartitioner: every key containing one of these substrings goes to one partition.
     # "VIP=0" pins VIP to partition 0; a bare substring is hashed (murmur2): UK → 1, US → 2 on 3 partitions.
     substring-partitions: VIP=0,UK,US
-
-server:
-  port: 8080
 
 management:
   endpoints:
