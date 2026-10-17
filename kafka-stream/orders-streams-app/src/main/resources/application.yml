@@ -1,3 +1,6 @@
+server:
+  port: 8082
+
 spring:
   application:
     name: orders-kafka-streams
@@ -27,9 +30,6 @@ spring:
       # state-dir: /var/lib/orders-streams                           # RocksDB state (default: <tmp>/kafka-streams)
 # Serdes and exception handlers are set in OrdersStreamsConfiguration: its KafkaStreamsConfiguration
 # bean replaces Boot's, so spring.kafka.properties / spring.kafka.streams.properties never reach Streams.
-
-server:
-  port: 8082
 
 management:
   endpoints:

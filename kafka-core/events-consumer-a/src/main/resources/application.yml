@@ -1,3 +1,6 @@
+server:
+  port: 8081
+
 spring:
   application:
     name: events-consumer-a
@@ -69,9 +72,6 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-
-server:
-  port: 8081
 
 management:
   endpoints:
