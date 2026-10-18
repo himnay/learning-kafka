@@ -73,6 +73,12 @@ import static org.mockito.Mockito.*;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
+@TestPropertySource(properties = {
+        "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
+        "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}",
+        "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
+        "spring.kafka.properties.schema.registry.url=" + AvroEvents.REGISTRY
+})
 @EmbeddedKafka(topics = {"library-events", "coffee-orders"}, partitions = 3, brokerProperties = {
         // single embedded broker: the transaction state log must fit on one node
         "transaction.state.log.replication.factor=1",
@@ -80,12 +86,6 @@ import static org.mockito.Mockito.*;
         // ...and so must the share-group state topic (__share_group_state) used by the barista share group
         "share.coordinator.state.topic.replication.factor=1",
         "share.coordinator.state.topic.min.isr=1"
-})
-@TestPropertySource(properties = {
-        "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
-        "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}",
-        "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",
-        "spring.kafka.properties.schema.registry.url=" + AvroEvents.REGISTRY
 })
 class LibraryEventsConsumerIntegrationTest {
 

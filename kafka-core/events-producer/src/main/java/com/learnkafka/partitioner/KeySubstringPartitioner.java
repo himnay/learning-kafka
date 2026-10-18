@@ -1,11 +1,11 @@
 package com.learnkafka.partitioner;
 
+import com.learnkafka.partitioner.model.Rule;
 import org.apache.kafka.clients.producer.Partitioner;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.utils.Utils;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -33,22 +33,6 @@ public class KeySubstringPartitioner implements Partitioner {
 
     /** Producer property carrying the rules, e.g. "VIP=0,UK,US". */
     public static final String RULES_CONFIG = "key.substring.partitions";
-
-    /** A substring and the partition it is pinned to; {@code pinnedPartition} null = hash the substring. */
-    public record Rule(String substring, Integer pinnedPartition) {
-
-        int partitionFor(String topic, int numPartitions) {
-            if (pinnedPartition == null) {
-                return Utils.toPositive(Utils.murmur2(substring.getBytes(StandardCharsets.UTF_8))) % numPartitions;
-            }
-            if (pinnedPartition >= numPartitions) {
-                // Kafka does not check this: the record would wait for a partition that never appears
-                throw new IllegalArgumentException("Rule " + substring + "=" + pinnedPartition + " needs partition "
-                        + pinnedPartition + ", but topic " + topic + " has " + numPartitions + " partitions");
-            }
-            return pinnedPartition;
-        }
-    }
 
     private List<Rule> rules = List.of();
 

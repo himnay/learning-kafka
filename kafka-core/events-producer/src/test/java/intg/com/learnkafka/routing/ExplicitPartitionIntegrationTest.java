@@ -31,10 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
  * POST /v1/key-routing/partitions/{partition} against a real 3-partition topic. Its own broker:
  * KeyRoutingIntegrationTest counts every record on the topic, so it can't share one.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@DirtiesContext
 @Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(topics = KeyRoutingProducer.TOPIC, partitions = 3)
-@DirtiesContext
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(properties = {
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",

@@ -23,8 +23,8 @@ import java.util.Map;
  * re-apply a range, delete its processed_event rows first.
  */
 @RestController
-@Profile("!manual-offset")
 @RequiredArgsConstructor
+@Profile("!manual-offset")
 @RequestMapping("/v1/library-events/replay")
 public class ReplayController {
 

@@ -4,6 +4,7 @@ import com.learnkafka.avro.LibraryEventAvro;
 import com.learnkafka.event.EventMetadata;
 import com.learnkafka.event.EventMetadataMdcInterceptor;
 import com.learnkafka.retry.RetryRouter.Route;
+import com.learnkafka.retry.model.DrainResult;
 import com.learnkafka.service.LibraryEventsService;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import jakarta.annotation.PreDestroy;
@@ -55,9 +56,6 @@ public class RetryTopicDrainer {
     private static final LogAccessor LOG_ACCESSOR = new LogAccessor(RetryTopicDrainer.class);
     private static final Duration ASSIGNMENT_WAIT = Duration.ofSeconds(10);
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(500);
-
-    /** What one run did. */
-    public record DrainResult(int processed, int requeued, int deadLettered) {}
 
     private final ConsumerFactory<Object, Object> consumerFactory;
     // Must be the same KafkaTemplate RetryRouter publishes with: the forward joins transaction 2 only

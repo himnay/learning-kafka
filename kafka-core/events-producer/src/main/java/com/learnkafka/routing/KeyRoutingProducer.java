@@ -3,7 +3,7 @@ package com.learnkafka.routing;
 import com.learnkafka.domain.KeyRoutingRequest;
 import com.learnkafka.domain.KeyRoutingResponse;
 import com.learnkafka.partitioner.KeySubstringPartitioner;
-import com.learnkafka.partitioner.KeySubstringPartitioner.Rule;
+import com.learnkafka.partitioner.model.Rule;
 import jakarta.annotation.PreDestroy;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;

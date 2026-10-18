@@ -21,8 +21,8 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Slf4j
 @RestController
-@RequestMapping("/v1/coffee-orders")
 @RequiredArgsConstructor
+@RequestMapping("/v1/coffee-orders")
 public class CoffeeOrdersController {
 
     private final CoffeeOrderService coffeeOrderService;

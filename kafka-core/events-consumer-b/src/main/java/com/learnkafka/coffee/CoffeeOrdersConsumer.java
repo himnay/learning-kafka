@@ -37,6 +37,9 @@ public class CoffeeOrdersConsumer {
     public static final String GROUP_ID = "coffee-orders-listener-group";
 
     /** Handles message. */
+    @KafkaListener(topics = TOPIC, groupId = GROUP_ID,
+            containerFactory = CoffeeKafkaConfig.COFFEE_ORDERS_CONTAINER_FACTORY,
+            properties = "key.deserializer=org.apache.kafka.common.serialization.StringDeserializer")
     @RetryableTopic(
             attempts = "4",                                            // 1 main + 3 retry topics
             backOff = @BackOff(delay = 1_000, multiplier = 2.0, maxDelay = 10_000),
@@ -45,9 +48,6 @@ public class CoffeeOrdersConsumer {
             autoCreateTopics = "true", numPartitions = "3", replicationFactor = "-1",   // RF -1 = broker default
             kafkaTemplate = CoffeeKafkaConfig.COFFEE_RETRY_TEMPLATE,
             listenerContainerFactory = CoffeeKafkaConfig.COFFEE_ORDERS_CONTAINER_FACTORY)
-    @KafkaListener(topics = TOPIC, groupId = GROUP_ID,
-            containerFactory = CoffeeKafkaConfig.COFFEE_ORDERS_CONTAINER_FACTORY,
-            properties = "key.deserializer=org.apache.kafka.common.serialization.StringDeserializer")
     public void onMessage(ConsumerRecord<String, CoffeeOrder> record) {
         var order = record.value();
         var name = order.getName().toString().toLowerCase(Locale.ROOT);

@@ -1,6 +1,6 @@
 package com.learnkafka.partitioner;
 
-import com.learnkafka.partitioner.KeySubstringPartitioner.Rule;
+import com.learnkafka.partitioner.model.Rule;
 import org.apache.kafka.clients.producer.internals.BuiltInPartitioner;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;

@@ -26,8 +26,8 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
-@Profile("!manual-offset")
 @RequiredArgsConstructor
+@Profile("!manual-offset")
 public class LibraryEventsConsumer extends AbstractConsumerSeekAware {
 
     /**

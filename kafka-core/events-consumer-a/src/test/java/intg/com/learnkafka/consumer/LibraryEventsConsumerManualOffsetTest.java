@@ -29,8 +29,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** The "manual-offset" profile swaps in the manual-ack listener, and its acknowledge() commits the offset. */
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
 @ActiveProfiles("manual-offset")
+@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(topics = {"library-events", "coffee-orders"}, partitions = 3, brokerProperties = {
         // single embedded broker: the transaction state log must fit on one node
         "transaction.state.log.replication.factor=1",

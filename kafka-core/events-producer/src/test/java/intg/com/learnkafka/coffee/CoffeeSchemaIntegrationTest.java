@@ -14,8 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** The producer owns a coffee schema: Flyway creates it in PostgreSQL at startup. */
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(partitions = 3)
+@Import(TestcontainersConfiguration.class)
 @TestPropertySource(properties = {
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",

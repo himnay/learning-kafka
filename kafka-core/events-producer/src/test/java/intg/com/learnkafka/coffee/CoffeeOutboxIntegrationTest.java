@@ -39,9 +39,9 @@ import static org.mockito.Mockito.doThrow;
  * POST /v1/coffee-orders against a real PostgreSQL. A logical replication slot with the test_decoding
  * plugin shows exactly what Debezium will read from the write-ahead log.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(partitions = 3)
+@Import(TestcontainersConfiguration.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(properties = {
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",

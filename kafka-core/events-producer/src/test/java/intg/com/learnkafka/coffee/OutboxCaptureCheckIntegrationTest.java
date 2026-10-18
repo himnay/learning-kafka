@@ -15,8 +15,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** OutboxCaptureCheck against a real PostgreSQL (wal_level=logical, no Debezium slot by default). */
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
 @EmbeddedKafka(partitions = 3)
+@Import(TestcontainersConfiguration.class)
 @TestPropertySource(properties = {
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.admin.properties.bootstrap.servers=${spring.embedded.kafka.brokers}",

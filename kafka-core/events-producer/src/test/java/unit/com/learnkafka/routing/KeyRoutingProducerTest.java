@@ -108,8 +108,8 @@ class KeyRoutingProducerTest {
                 .andExpect(jsonPath("$.offset").value(5));
     }
 
-    @ParameterizedTest(name = "partition {0}")
     @ValueSource(ints = {3, -1})
+    @ParameterizedTest(name = "partition {0}")
     @DisplayName("A partition the topic doesn't have is rejected with 400 and nothing is published")
     void partitionOutOfRange(int partition) throws Exception {
         lenient().when(kafkaTemplate.partitionsFor(KeyRoutingProducer.TOPIC)).thenReturn(threePartitions());
