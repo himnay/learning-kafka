@@ -54,7 +54,7 @@ For the broader repo architecture and core Kafka vocabulary, see the [root READM
 
 | Piece | Version (as of 2026) | Used for |
 |---|---|---|
-| Spring Boot | 4.1.1 | all three apps (single default config, no profiles) |
+| Spring Boot | 4.1.2 | all three apps (single default config, no profiles) |
 | Spring Kafka | 4.1.1 | `KafkaTemplate`, `@KafkaListener`, transactions |
 | Apache Kafka clients | 4.2.1 | producers / consumers |
 | Kafka broker | `confluentinc/cp-kafka:8.3.2` (KRaft, no ZooKeeper) | 3-node cluster |

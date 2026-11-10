@@ -203,7 +203,7 @@ A second path exists for **recoverable** failures ([`RecoverableDataAccessExcept
 | Concern       | Technology                                                                      |
 |---------------|---------------------------------------------------------------------------------|
 | Language      | Java 27 with virtual threads (Project Loom)                                     |
-| Framework     | Spring Boot 4.1.1 / Spring Kafka 4.1.1 (via super-pom 1.2.0, as of 2026)          |
+| Framework     | Spring Boot 4.1.2 / Spring Kafka 4.1.2 (via super-pom 1.2.2, as of 2026)          |
 | Messaging     | Apache Kafka 4.2 clients, Confluent Platform 8.3.2 broker — KRaft only (ZooKeeper removed in Kafka 4) |
 | Schema        | Confluent Schema Registry 8.3.2 + Apache Avro 1.12.2                            |
 | Streams       | Kafka Streams (via Spring Kafka)                                                |

@@ -26,7 +26,7 @@ For the broader repo architecture, see the [root README](../README.md).
 
 | Piece | Version (as of 2026) | Used for |
 |---|---|---|
-| Spring Boot | 4.1.1 | app, REST API, Actuator (single default config, no profiles) |
+| Spring Boot | 4.1.2 | app, REST API, Actuator (single default config, no profiles) |
 | Spring Kafka | 4.1.1 | `@EnableKafkaStreams`, `StreamsBuilderFactoryBean`, `JacksonJsonSerde` |
 | Kafka Streams | 4.2.x | topology, state stores (RocksDB), interactive queries |
 | Kafka broker | the kafka-core cluster (`cp-kafka:8.3.2`, 3 brokers) | `orders`, `stores`, internal repartition/changelog topics |
