@@ -193,7 +193,7 @@ sequenceDiagram
     Note over Listener,Topic: Offset for the original record is committed —\nthe consumer moves on#59; the DLT holds the poison message for manual inspection/replay
 ```
 
-A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `RetryRouter` forwards the record to `library-events.retry` with a `retry-attempt` header, and the scheduled `RetryTopicDrainer` retries it once it has waited `app.retry.delay` (runs every `app.retry.interval`) until `app.retry.max-attempts`, then dead-letters it. A real outage counts: Spring reports it as `CannotCreateTransactionException`, not `RecoverableDataAccessException`, and the retry rule matches the whole family of transient failures. See [kafka-core §14](kafka-core/README.md#14-error-handling-retries-recovery-dead-letter-topic) for the full retry/backoff timeline.
+A second path exists for **recoverable** failures ([`RecoverableDataAccessException`][RecoverableDataAccessException], e.g. a transient DB outage): instead of routing to the DLT, `RetryRouter` forwards the record to `library-events.retry` with a `retry-attempt` header, and the scheduled `RetryTopicDrainer` retries it once it has waited `app.retry.delay` (runs every `app.retry.interval`) until `app.retry.max-attempts`, then dead-letters it. A real outage counts: Spring reports it as `CannotCreateTransactionException`, not `RecoverableDataAccessException`, and the retry rule matches the whole family of transient failures. See [events-consumer §7](kafka-core/events-consumer-a/README.md#7-error-handling-retries-recovery-dead-letter-topic) for the full retry/backoff timeline.
 
 ---
 
@@ -253,7 +253,7 @@ The root `docker-compose.yml` `include:`s [`kafka-core/docker-compose.yml`](kafk
 
 | Service | URL / port | Notes |
 |---|---|---|
-| Kafka (KRaft, 3 brokers) | `localhost:9092`, `9093`, `9094` | `broker,controller` on each node; topics and SCRAM users created by `kafka-init`; ***SASL_SSL*** for apps on the host ([kafka-core §30](kafka-core/README.md#30-security-sasl-scram-over-tls)) |
+| Kafka (KRaft, 3 brokers) | `localhost:9092`, `9093`, `9094` | `broker,controller` on each node; topics and SCRAM users created by `kafka-init`; ***SASL_SSL*** for apps on the host ([kafka-core §11](kafka-core/README.md#11-security-sasl-scram-over-tls)) |
 | Schema Registry | http://localhost:8085 | Avro schemas |
 | PostgreSQL | `localhost:5435` (library/library) | consumer data, idempotency table, Connect replica, coffee outbox (`wal_level=logical`) |
 | Kafka Connect | http://localhost:8083 | JDBC sink → `events` table; Debezium outbox → `coffee-orders` |
@@ -305,7 +305,7 @@ Content-Type: application/json
 
 Optional header `X-Correlation-Id: <anything>` — copied into the event's metadata. A `libraryEventId` in a POST is rejected with `400` (the consumers' database assigns it).
 
-Response `201 Created` — the event as published, with its base-event metadata ([kafka-core §6](kafka-core/README.md#6-base-event-common-metadata-for-every-event)):
+Response `201 Created` — the event as published, with its base-event metadata ([events-producer §3](kafka-core/events-producer/README.md#3-base-event-common-metadata-for-every-event)):
 ```json
 {
   "metadata": {
@@ -346,7 +346,7 @@ Response `200 OK` with the same shape (`eventType: LibraryEvent.UPDATE`); `400` 
 { "name": "Ada", "nickName": "Countess" }
 ```
 
-Response `201 Created`: the order's id, name, status, ordered time and its `metadata` (`eventType: CoffeeOrder.PLACED`). VIP customers (`Ada`, `Grace`) go to partition 0 — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression). The order and its event are committed to PostgreSQL in one transaction (transactional outbox) and Debezium publishes the event — see [kafka-core §32](kafka-core/README.md#32-transactional-outbox-for-coffee-orders-debezium).
+Response `201 Created`: the order's id, name, status, ordered time and its `metadata` (`eventType: CoffeeOrder.PLACED`). VIP customers (`Ada`, `Grace`) go to partition 0 — see [events-producer §7](kafka-core/events-producer/README.md#7-custom-partitioner-and-compression). The order and its event are committed to PostgreSQL in one transaction (transactional outbox) and Debezium publishes the event — see [events-producer §8](kafka-core/events-producer/README.md#8-transactional-outbox-for-coffee-orders-debezium).
 
 ### <span style="color:hsl(220,80%,58%)">POST /v1/key-routing — Send a record whose key picks the partition</span>
 
@@ -354,7 +354,7 @@ Response `201 Created`: the order's id, name, status, ordered time and its `meta
 { "key": "order-VIP-1001", "message": "VIP order" }
 ```
 
-Response `201 Created`: `{"key": "order-VIP-1001", "matchedSubstring": "VIP", "partition": 0, "offset": 0}`. `KeySubstringPartitioner` sends every key containing a configured substring to one partition (`VIP` → 0, `UK` → 1, `US` → 2); other keys are hashed like Kafka's default — see [kafka-core §25](kafka-core/README.md#25-custom-partitioner-and-compression).
+Response `201 Created`: `{"key": "order-VIP-1001", "matchedSubstring": "VIP", "partition": 0, "offset": 0}`. `KeySubstringPartitioner` sends every key containing a configured substring to one partition (`VIP` → 0, `UK` → 1, `US` → 2); other keys are hashed like Kafka's default — see [events-producer §7](kafka-core/events-producer/README.md#7-custom-partitioner-and-compression).
 
 ### <span style="color:hsl(357,80%,58%)">POST /v1/key-routing/partitions/{partition} — Send a record to a partition you choose</span>
 
@@ -362,7 +362,7 @@ Response `201 Created`: `{"key": "order-VIP-1001", "matchedSubstring": "VIP", "p
 { "key": "order-VIP-1002", "message": "pinned by the caller" }
 ```
 
-Response `201 Created` for `/partitions/2`: `{"key": "order-VIP-1002", "matchedSubstring": null, "partition": 2, "offset": 0}`. An explicit partition skips the partitioner, so even a VIP key lands where you said. A partition the topic doesn't have returns `400` — see [kafka-core §9](kafka-core/README.md#9-producers).
+Response `201 Created` for `/partitions/2`: `{"key": "order-VIP-1002", "matchedSubstring": null, "partition": 2, "offset": 0}`. An explicit partition skips the partitioner, so even a VIP key lands where you said. A partition the topic doesn't have returns `400` — see [events-producer §5](kafka-core/events-producer/README.md#5-producers).
 
 ---
 
